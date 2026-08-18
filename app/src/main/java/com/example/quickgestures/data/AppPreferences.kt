@@ -100,6 +100,13 @@ class AppPreferences(context: Context) {
         get() = prefs.getBoolean("one_handed_enabled", false)
         set(v) = prefs.edit().putBoolean("one_handed_enabled", v).apply()
 
+    // ---------- مراقب سرعة الإنترنت ----------
+    var networkSpeedDisplayMode: NetworkSpeedDisplayMode
+        get() = NetworkSpeedDisplayMode.valueOf(
+            prefs.getString("network_speed_mode", NetworkSpeedDisplayMode.OFF.name)!!
+        )
+        set(v) = prefs.edit().putString("network_speed_mode", v.name).apply()
+
     // ---------- قفل التطبيقات ----------
     var lockedPackages: Set<String>
         get() = prefs.getStringSet("locked_packages", emptySet()) ?: emptySet()

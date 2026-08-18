@@ -19,6 +19,7 @@ import com.example.quickgestures.data.AppPreferences
 import com.example.quickgestures.services.ShakeDetectorService
 import com.example.quickgestures.services.edge.EdgeGestureService
 import com.example.quickgestures.services.floating.FloatingBallService
+import com.example.quickgestures.services.network.NetworkSpeedService
 import com.example.quickgestures.ui.screens.*
 
 class MainActivity : ComponentActivity() {
@@ -71,6 +72,10 @@ class MainActivity : ComponentActivity() {
                 startService(Intent(this, EdgeGestureService::class.java))
             }
         }
+
+        if (prefs.networkSpeedDisplayMode != com.example.quickgestures.data.NetworkSpeedDisplayMode.OFF) {
+            startForegroundService(Intent(this, NetworkSpeedService::class.java))
+        }
     }
 }
 
@@ -109,6 +114,7 @@ fun MainAppStructure(prefs: AppPreferences, onRequestOverlayPermission: () -> Un
             composable("app_lock") { AppLockScreen(prefs, onStateChanged) }
             composable("calibration") { AutoCalibrationScreen(prefs, onStateChanged) }
             composable("profiles") { ProfilesScreen(prefs, onStateChanged) }
+            composable("network_speed") { NetworkSpeedScreen(prefs, onStateChanged) }
         }
     }
 }

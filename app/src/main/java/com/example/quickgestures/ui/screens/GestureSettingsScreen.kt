@@ -24,6 +24,7 @@ fun GestureSettingsScreen(onNavigate: (String) -> Unit) {
         SettingsEntry("قفل التطبيقات", "قفل موحّد لأي تطبيقات تختارها", Icons.Default.Lock, "app_lock"),
         SettingsEntry("المعايرة والحركة", "حساسية تكيّفية + حساس التقارب + اليد الواحدة", Icons.Default.Vibration, "calibration"),
         SettingsEntry("البروفايلات", "تصدير/استيراد كل الإعدادات كملف واحد", Icons.Default.ImportExport, "profiles"),
+        SettingsEntry("مراقب سرعة الإنترنت", "سرعة الداونلود والأبلود بشريط الإشعارات", Icons.Default.NetworkCheck, "network_speed"),
     )
 
     LazyColumn(

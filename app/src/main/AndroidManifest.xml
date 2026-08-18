@@ -10,6 +10,7 @@
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- لازمة لعرض قائمة التطبيقات المثبّتة بشاشة "قفل التطبيقات" على أندرويد 11+ -->
@@ -22,8 +23,8 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@android:drawable/sym_def_app_icon"
-        android:roundIcon="@android:drawable/sym_def_app_icon"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
@@ -72,6 +73,11 @@
 
         <service
             android:name=".services.edge.EdgeGestureService"
+            android:exported="false" />
+
+        <service
+            android:name=".services.network.NetworkSpeedService"
+            android:foregroundServiceType="dataSync"
             android:exported="false" />
 
     </application>
