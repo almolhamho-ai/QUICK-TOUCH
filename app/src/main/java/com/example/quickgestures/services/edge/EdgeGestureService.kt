@@ -1,125 +1,90 @@
 package com.example.quickgestures.services.edge
 
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.IBinder
-import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import com.example.quickgestures.data.AppPreferences
-import com.example.quickgestures.data.EdgeShape
-import com.example.quickgestures.services.routine.RoutineEngine
+import com.example.quickgestures.data.GestureActionCatalog
 import com.example.quickgestures.utils.ActionExecutor
 import kotlin.math.abs
 
-/**
- * خدمة عائمة شفافة تحط شرايط رفيعة على حواف الشاشة (يمين/يسار)، وبترصد نمط السحبة
- * وتصنّفها لشكل بسيط: خط مستقيم / زاوية L / نص دائرة، وبعدين تنفذ الإجراء المربوط فيه.
- */
+enum class EdgeGestureShape { STRAIGHT_LINE, L_CORNER, HALF_CIRCLE }
+
+/** يضيف شريط لمس شفاف رفيع عند حافتي الشاشة، ويصنّف شكل السحبة تلقائياً. */
 class EdgeGestureService : Service() {
 
     private lateinit var windowManager: WindowManager
-    private var edgeView: View? = null
     private lateinit var prefs: AppPreferences
-
-    private val touchPoints = mutableListOf<Pair<Float, Float>>()
+    private lateinit var actionExecutor: ActionExecutor
+    private val pathPoints = mutableListOf<Pair<Float, Float>>()
 
     override fun onCreate() {
         super.onCreate()
-        prefs = AppPreferences(this)
-        windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        addEdgeStrip()
+        prefs = AppPreferences(applicationContext)
+        actionExecutor = ActionExecutor(applicationContext)
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        addEdgeStrip(Gravity.START)
+        addEdgeStrip(Gravity.END)
     }
 
-    private fun addEdgeStrip() {
-        val metrics = DisplayMetrics()
-        windowManager.defaultDisplay.getMetrics(metrics)
-
-        val stripWidthPx = (18 * metrics.density).toInt()
-        val overlayType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-
+    private fun addEdgeStrip(gravity: Int) {
         val params = WindowManager.LayoutParams(
-            stripWidthPx,
+            24,
             WindowManager.LayoutParams.MATCH_PARENT,
-            overlayType,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
-        ).apply {
-            gravity = Gravity.START or Gravity.TOP
-        }
+        ).apply { this.gravity = gravity or Gravity.CENTER_VERTICAL }
 
-        val view = object : View(this) {
+        val strip = object : View(this) {
             override fun onTouchEvent(event: MotionEvent): Boolean {
-                handleTouch(event)
+                when (event.action) {
+                    MotionEvent.ACTION_DOWN -> pathPoints.clear().also { pathPoints.add(event.rawX to event.rawY) }
+                    MotionEvent.ACTION_MOVE -> pathPoints.add(event.rawX to event.rawY)
+                    MotionEvent.ACTION_UP -> {
+                        pathPoints.add(event.rawX to event.rawY)
+                        val shape = classifyShape(pathPoints)
+                        onGestureClassified(shape)
+                    }
+                }
                 return true
             }
         }
-        view.setOnTouchListener { _, event -> handleTouch(event); true }
+        windowManager.addView(strip, params)
+    }
 
-        edgeView = view
-        try {
-            windowManager.addView(view, params)
-        } catch (e: Exception) {
-            e.printStackTrace()
+    private fun classifyShape(points: List<Pair<Float, Float>>): EdgeGestureShape {
+        if (points.size < 3) return EdgeGestureShape.STRAIGHT_LINE
+
+        val start = points.first()
+        val end = points.last()
+        val totalDx = abs(end.first - start.first)
+        val totalDy = abs(end.second - start.second)
+
+        // فحص وجود نقطة انعطاف حادة بمنتصف المسار = زاوية L
+        val mid = points[points.size / 2]
+        val turnDx = abs(mid.first - start.first)
+        val turnDy = abs(mid.second - start.second)
+        val hasSharpTurn = (turnDx > 40 && totalDy > 40) || (turnDy > 40 && totalDx > 40)
+
+        // فحص عودة نقطة النهاية قريبة من نقطة البداية = نص دائرة
+        val closesLoop = abs(end.first - start.first) < 60 && abs(end.second - start.second) < 60 && points.size > 8
+
+        return when {
+            closesLoop -> EdgeGestureShape.HALF_CIRCLE
+            hasSharpTurn -> EdgeGestureShape.L_CORNER
+            else -> EdgeGestureShape.STRAIGHT_LINE
         }
     }
 
-    private fun handleTouch(event: MotionEvent) {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                touchPoints.clear()
-                touchPoints.add(event.x to event.y)
-            }
-            MotionEvent.ACTION_MOVE -> touchPoints.add(event.x to event.y)
-            MotionEvent.ACTION_UP -> {
-                touchPoints.add(event.x to event.y)
-                classifyAndTrigger()
-                touchPoints.clear()
-            }
-        }
-    }
-
-    /** تصنيف مبسّط: نحسب عدد مرات تغيّر اتجاه الحركة (X مقابل Y) لتمييز خط عن زاوية عن نص دائرة */
-    private fun classifyAndTrigger() {
-        if (!prefs.edgeGestureEnabled || touchPoints.size < 4) return
-
-        var horizontalMoves = 0
-        var verticalMoves = 0
-        var directionChanges = 0
-        var lastDx = 0f
-        var lastDy = 0f
-
-        for (i in 1 until touchPoints.size) {
-            val (x0, y0) = touchPoints[i - 1]
-            val (x1, y1) = touchPoints[i]
-            val dx = x1 - x0
-            val dy = y1 - y0
-            if (abs(dx) > abs(dy)) horizontalMoves++ else verticalMoves++
-            if (lastDy != 0f && (dy > 0) != (lastDy > 0)) directionChanges++
-            lastDx = dx; lastDy = dy
-        }
-
-        val shape = when {
-            directionChanges >= 2 -> EdgeShape.HALF_CIRCLE
-            horizontalMoves > 0 && verticalMoves > 0 -> EdgeShape.CORNER_L
-            else -> EdgeShape.LINE
-        }
-
-        prefs.getEdgeMapping(shape)?.let { action ->
-            ActionExecutor.execute(this, com.example.quickgestures.data.GestureActionRef(action))
-        }
-        RoutineEngine.onEdgeGestureTriggered(this, shape)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        edgeView?.let { runCatching { windowManager.removeView(it) } }
+    private fun onGestureClassified(shape: EdgeGestureShape) {
+        val actionId = prefs.edgeGestureActionMapping[shape.name] ?: return
+        GestureActionCatalog.byId(actionId)?.let { actionExecutor.execute(it) }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

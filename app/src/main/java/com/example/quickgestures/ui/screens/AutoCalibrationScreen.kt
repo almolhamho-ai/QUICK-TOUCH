@@ -9,57 +9,70 @@ import androidx.compose.ui.unit.dp
 import com.example.quickgestures.data.AppPreferences
 
 @Composable
-fun AutoCalibrationScreen(prefs: AppPreferences, onStateChanged: () -> Unit) {
-    var sensitivity by remember { mutableFloatStateOf(prefs.shakeSensitivity) }
-    var adaptive by remember { mutableStateOf(prefs.adaptiveCalibrationEnabled) }
-    var proximityGuard by remember { mutableStateOf(prefs.proximityGuardEnabled) }
-    var oneHanded by remember { mutableStateOf(prefs.oneHandedModeEnabled) }
+fun AutoCalibrationScreen(prefs: AppPreferences) {
+    var sensitivity by remember { mutableIntStateOf(prefs.shakeSensitivityLevel) }
+    var proximityGuard by remember { mutableStateOf(prefs.proximityPocketGuardEnabled) }
+    var flashVibrationMs by remember { mutableIntStateOf(prefs.flashConfirmVibrationMs) }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        Text("المعايرة والحركة", style = MaterialTheme.typography.headlineSmall)
-
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp)) {
-                Text("حساسية هز الهاتف الأساسية: ${"%.1f".format(sensitivity)}")
-                Slider(
-                    value = sensitivity,
-                    onValueChange = {
-                        sensitivity = it; prefs.shakeSensitivity = it; onStateChanged()
-                    },
-                    valueRange = 5f..25f
-                )
-            }
+        // 3) حساسية الاهتزاز: 1 (صعب) → 10 (سهل)، أعداد طبيعية فقط
+        Column {
+            Text("حساسية الاهتزاز: $sensitivity / 10", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "كل ما اقتربت من 1 صار تفعيل الهزة أصعب، وكل ما اقتربت من 10 صار أسهل.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Slider(
+                value = sensitivity.toFloat(),
+                onValueChange = { sensitivity = it.toInt() },
+                onValueChangeFinished = { prefs.shakeSensitivityLevel = sensitivity },
+                valueRange = AppPreferences.SENSITIVITY_MIN.toFloat()..AppPreferences.SENSITIVITY_MAX.toFloat(),
+                steps = (AppPreferences.SENSITIVITY_MAX - AppPreferences.SENSITIVITY_MIN) - 1 // يقفل القيم على أعداد صحيحة
+            )
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        // 4) حماية الجيب عبر حساس التقارب
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column(Modifier.weight(1f)) {
-                Text("معايرة تكيّفية تلقائية")
-                Text("ترفع الحساسية تلقائياً وقت المشي أو بالسيارة لتقليل التفعيل الخاطئ", style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = adaptive, onCheckedChange = { adaptive = it; prefs.adaptiveCalibrationEnabled = it; onStateChanged() })
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("حماية حساس التقارب")
-                Text("يمنع التفعيل الخاطئ لما الهاتف بالجيب أو مغطى", style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(checked = proximityGuard, onCheckedChange = { proximityGuard = it; prefs.proximityGuardEnabled = it; onStateChanged() })
-        }
-
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("وضعية اليد الواحدة")
+                Text("تجاهل الهزة بالجيب", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "ملاحظة: أندرويد ما بيسمح لتطبيق عادي (بدون صلاحيات نظام) يحرّك كامل الشاشة. " +
-                        "هاي الميزة بتفتح لوحة إجراءات مصغّرة قريبة من الإبهام بدل تحريك الشاشة كلها.",
+                    "يستخدم حساس التقارب لمعرفة إذا الجهاز مغطى (بالجيب) ويمنع التفعيل الخاطئ.",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
-            Switch(checked = oneHanded, onCheckedChange = { oneHanded = it; prefs.oneHandedModeEnabled = it; onStateChanged() })
+            Switch(
+                checked = proximityGuard,
+                onCheckedChange = {
+                    proximityGuard = it
+                    prefs.proximityPocketGuardEnabled = it
+                }
+            )
+        }
+
+        // 5) زمن اهتزاز التأكيد بعد تفعيل الفلاش: 0..3 ثواني
+        Column {
+            val seconds = flashVibrationMs / 1000f
+            Text("زمن اهتزاز التأكيد بعد الفلاش: ${"%.1f".format(seconds)} ثانية", style = MaterialTheme.typography.titleMedium)
+            Text(
+                if (flashVibrationMs == 0) "بدون اهتزاز" else "يهتز الجهاز لهاد المدة كتأكيد بعد تفعيل الفلاش.",
+                style = MaterialTheme.typography.bodySmall
+            )
+            Slider(
+                value = flashVibrationMs.toFloat(),
+                onValueChange = { flashVibrationMs = it.toInt() },
+                onValueChangeFinished = { prefs.flashConfirmVibrationMs = flashVibrationMs },
+                valueRange = 0f..3000f,
+                steps = 11 // خطوات كل 250ms تقريباً
+            )
         }
     }
 }

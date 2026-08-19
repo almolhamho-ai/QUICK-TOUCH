@@ -1,150 +1,136 @@
 package com.example.quickgestures.data
 
 import android.content.Context
-import org.json.JSONArray
-import org.json.JSONObject
+import android.content.SharedPreferences
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 
 /**
- * مخزن إعدادات مركزي واحد لكل التطبيق (SharedPreferences + JSON).
- * كل الميزات (الكرة، إيماءات الحافة، الروتينات، القفل، التسجيل...) بتقرأ/بتكتب من هون.
+ * المخزن المركزي لكل إعدادات التطبيق.
+ * تم تحديثه ليشمل:
+ *  - حساسية الاهتزاز كرقم طبيعي من 1 إلى 10 (1 = أصعب تفعيل، 10 = أسهل تفعيل)
+ *  - زمن اهتزاز التأكيد بعد تفعيل الفلاش (0 إلى 3 ثواني)
+ *  - إعدادات الكرة العائمة كقائمة دائرية (Radial) بدل القائمة الخطية القديمة
  */
 class AppPreferences(context: Context) {
 
-    private val prefs = context.applicationContext
-        .getSharedPreferences("quick_touch_prefs", Context.MODE_PRIVATE)
+    private val prefs: SharedPreferences =
+        context.getSharedPreferences("quick_touch_prefs", Context.MODE_PRIVATE)
 
-    // ---------- الكرة العائمة ----------
-    var quickBallEnabled: Boolean
-        get() = prefs.getBoolean("quick_ball_enabled", true)
-        set(v) = prefs.edit().putBoolean("quick_ball_enabled", v).apply()
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    var quickBallWorksOutsideApp: Boolean
-        get() = prefs.getBoolean("quick_ball_outside", true)
-        set(v) = prefs.edit().putBoolean("quick_ball_outside", v).apply()
+    // ---------------------------------------------------------------------
+    // 3) حساسية الاهتزاز: 1 (صعب) .. 10 (سهل) — رقم طبيعي فقط، لا كسور
+    // ---------------------------------------------------------------------
+    companion object {
+        const val SENSITIVITY_MIN = 1
+        const val SENSITIVITY_MAX = 10
+        const val SENSITIVITY_DEFAULT = 5
 
-    var quickBallActions: List<GestureAction>
+        // حدود التسارع الفعلية (m/s²) المرتبطة بكل مستوى حساسية.
+        // القيمة الأعلى = عتبة أعلى = صعوبة أكبر بالتفعيل (لمستوى 1).
+        // القيمة الأدنى = عتبة أدنى = سهولة أكبر بالتفعيل (لمستوى 10).
+        private const val THRESHOLD_HARDEST = 22f   // عند حساسية = 1
+        private const val THRESHOLD_EASIEST = 8f    // عند حساسية = 10
+
+        fun sensitivityToThreshold(level: Int): Float {
+            val clamped = level.coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)
+            // تدرج خطي معكوس: كل ما زاد الرقم قلّت العتبة (أسهل)
+            val fraction = (clamped - SENSITIVITY_MIN).toFloat() / (SENSITIVITY_MAX - SENSITIVITY_MIN)
+            return THRESHOLD_HARDEST - (THRESHOLD_HARDEST - THRESHOLD_EASIEST) * fraction
+        }
+    }
+
+    var shakeSensitivityLevel: Int
+        get() = prefs.getInt("shake_sensitivity_level", SENSITIVITY_DEFAULT)
+            .coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)
+        set(value) = prefs.edit()
+            .putInt("shake_sensitivity_level", value.coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX))
+            .apply()
+
+    /** العتبة الفعلية الجاهزة للاستخدام مباشرة داخل ShakeDetectorService */
+    fun currentShakeThreshold(): Float = sensitivityToThreshold(shakeSensitivityLevel)
+
+    // ---------------------------------------------------------------------
+    // 5) زمن اهتزاز التأكيد بعد تفعيل الفلاش: 0..3000 ملي ثانية (خطوة 250ms)
+    // ---------------------------------------------------------------------
+    var flashConfirmVibrationMs: Int
+        get() = prefs.getInt("flash_confirm_vibration_ms", 300).coerceIn(0, 3000)
+        set(value) = prefs.edit()
+            .putInt("flash_confirm_vibration_ms", value.coerceIn(0, 3000))
+            .apply()
+
+    // ---------------------------------------------------------------------
+    // 4) استخدام حساس التقارب لاكتشاف وضعية "بالجيب"
+    // ---------------------------------------------------------------------
+    var proximityPocketGuardEnabled: Boolean
+        get() = prefs.getBoolean("proximity_pocket_guard", true)
+        set(value) = prefs.edit().putBoolean("proximity_pocket_guard", value).apply()
+
+    // ---------------------------------------------------------------------
+    // إيماءات الحافة: ربط كل شكل (STRAIGHT_LINE / L_CORNER / HALF_CIRCLE) بإجراء
+    // ---------------------------------------------------------------------
+    var edgeGestureActionMapping: Map<String, String>
         get() {
-            val raw = prefs.getString("quick_ball_actions", null) ?: return listOf(
-                GestureAction.GO_BACK, GestureAction.GO_HOME, GestureAction.TOGGLE_FLASHLIGHT,
-                GestureAction.OPEN_CAMERA, GestureAction.MUTE_VOLUME, GestureAction.LOCK_SCREEN
-            )
-            val arr = JSONArray(raw)
-            return (0 until arr.length()).mapNotNull { GestureAction.fromId(arr.getString(it)) }
+            val raw = prefs.getString("edge_gesture_mapping", null) ?: return emptyMap()
+            return try { json.decodeFromString(raw) } catch (e: Exception) { emptyMap() }
         }
-        set(v) {
-            val arr = JSONArray()
-            v.forEach { arr.put(it.id) }
-            prefs.edit().putString("quick_ball_actions", arr.toString()).apply()
-        }
+        set(value) = prefs.edit()
+            .putString("edge_gesture_mapping", json.encodeToString(value))
+            .apply()
 
-    // ---------- إيماءات الحافة ----------
-    var edgeGestureEnabled: Boolean
-        get() = prefs.getBoolean("edge_gesture_enabled", true)
-        set(v) = prefs.edit().putBoolean("edge_gesture_enabled", v).apply()
-
-    fun setEdgeMapping(shape: EdgeShape, action: GestureAction) {
-        prefs.edit().putString("edge_${shape.name}", action.id).apply()
-    }
-
-    fun getEdgeMapping(shape: EdgeShape): GestureAction? {
-        val id = prefs.getString("edge_${shape.name}", null) ?: return when (shape) {
-            EdgeShape.LINE -> GestureAction.GO_BACK
-            EdgeShape.CORNER_L -> GestureAction.RECENT_APPS
-            EdgeShape.HALF_CIRCLE -> GestureAction.TOGGLE_ONE_HANDED
-        }
-        return GestureAction.fromId(id)
-    }
-
-    // ---------- الروتينات ----------
-    var routines: List<Routine>
-        get() {
-            val raw = prefs.getString("routines", "[]")!!
-            val arr = JSONArray(raw)
-            return (0 until arr.length()).mapNotNull { Routine.fromJson(arr.getJSONObject(it)) }
-        }
-        set(v) {
-            val arr = JSONArray()
-            v.forEach { arr.put(it.toJson()) }
-            prefs.edit().putString("routines", arr.toString()).apply()
-        }
-
-    fun addOrUpdateRoutine(routine: Routine) {
-        routines = routines.filterNot { it.id == routine.id } + routine
-    }
-
-    fun deleteRoutine(id: String) {
-        routines = routines.filterNot { it.id == id }
-    }
-
-    // ---------- التسجيل الشفاف ----------
-    /** طرق تفعيل التسجيل يلي فعّلها المستخدم من بين الخيارات المتاحة */
-    var recordingTriggers: Set<String>
-        get() = prefs.getStringSet("recording_triggers", setOf("quick_ball")) ?: setOf("quick_ball")
-        set(v) = prefs.edit().putStringSet("recording_triggers", v).apply()
-
-    // ---------- المعايرة التكيّفية ----------
-    var shakeSensitivity: Float
-        get() = prefs.getFloat("shake_sensitivity", 12f)
-        set(v) = prefs.edit().putFloat("shake_sensitivity", v).apply()
-
-    var adaptiveCalibrationEnabled: Boolean
-        get() = prefs.getBoolean("adaptive_calibration", true)
-        set(v) = prefs.edit().putBoolean("adaptive_calibration", v).apply()
-
-    var proximityGuardEnabled: Boolean
-        get() = prefs.getBoolean("proximity_guard", true)
-        set(v) = prefs.edit().putBoolean("proximity_guard", v).apply()
-
-    // ---------- وضعية اليد الواحدة ----------
-    var oneHandedModeEnabled: Boolean
-        get() = prefs.getBoolean("one_handed_enabled", false)
-        set(v) = prefs.edit().putBoolean("one_handed_enabled", v).apply()
-
-    // ---------- مراقب سرعة الإنترنت ----------
+    // ---------------------------------------------------------------------
+    // مراقب سرعة الإنترنت
+    // ---------------------------------------------------------------------
     var networkSpeedDisplayMode: NetworkSpeedDisplayMode
-        get() = NetworkSpeedDisplayMode.valueOf(
-            prefs.getString("network_speed_mode", NetworkSpeedDisplayMode.OFF.name)!!
+        get() = try {
+            NetworkSpeedDisplayMode.valueOf(
+                prefs.getString("network_speed_mode", NetworkSpeedDisplayMode.DISABLED.name)!!
+            )
+        } catch (e: Exception) {
+            NetworkSpeedDisplayMode.DISABLED
+        }
+        set(value) = prefs.edit().putString("network_speed_mode", value.name).apply()
+
+    // ---------------------------------------------------------------------
+    // 2) إعدادات الكرة الدائرية (Radial Quick Ball)
+    // ---------------------------------------------------------------------
+    var quickBallRadialConfig: QuickBallRadialConfig
+        get() {
+            val raw = prefs.getString("quick_ball_radial_config", null)
+                ?: return QuickBallRadialConfig.default()
+            return try {
+                json.decodeFromString(raw)
+            } catch (e: Exception) {
+                QuickBallRadialConfig.default()
+            }
+        }
+        set(value) = prefs.edit()
+            .putString("quick_ball_radial_config", json.encodeToString(value))
+            .apply()
+}
+
+/**
+ * إعدادات القائمة الدائرية للكرة العائمة.
+ * itemsPerRing: كم اختصار يظهر بحلقة واحدة حول المركز قبل ما يحتاج تدوير.
+ * rotationOffsetDegrees: زاوية التدوير الحالية المختارة من المستخدم.
+ */
+@Serializable
+data class QuickBallRadialConfig(
+    val selectedActionIds: List<String>,
+    val itemsPerRing: Int = 6,
+    val rotationOffsetDegrees: Float = 0f,
+    val collapsedSizeDp: Int = 28,      // حجم نص الدائرة الصغير على الحافة قبل الفتح
+    val centerBubbleSizeDp: Int = 56,   // حجم الدائرة المركزية
+    val satelliteBubbleSizeDp: Int = 56 // نفس مقاس الدائرة المركزية (طلب المستخدم: بنفس المقاس)
+) {
+    companion object {
+        fun default() = QuickBallRadialConfig(
+            selectedActionIds = emptyList(),
+            itemsPerRing = 6,
+            rotationOffsetDegrees = 0f
         )
-        set(v) = prefs.edit().putString("network_speed_mode", v.name).apply()
-
-    // ---------- قفل التطبيقات ----------
-    var lockedPackages: Set<String>
-        get() = prefs.getStringSet("locked_packages", emptySet()) ?: emptySet()
-        set(v) = prefs.edit().putStringSet("locked_packages", v).apply()
-
-    /** true = استخدام قفل الجهاز نفسو (بصمة/نمط/رقم النظام)، false = رمز داخلي خاص بالتطبيق */
-    var useDeviceLock: Boolean
-        get() = prefs.getBoolean("use_device_lock", true)
-        set(v) = prefs.edit().putBoolean("use_device_lock", v).apply()
-
-    var customPinHash: String?
-        get() = prefs.getString("custom_pin_hash", null)
-        set(v) = prefs.edit().putString("custom_pin_hash", v).apply()
-
-    // ---------- تصدير/استيراد كامل البروفايل ----------
-    fun exportProfile(): JSONObject = JSONObject().apply {
-        put("quickBallActions", JSONArray(quickBallActions.map { it.id }))
-        put("routines", JSONArray(routines.map { it.toJson() }))
-        put("shakeSensitivity", shakeSensitivity)
-        put("recordingTriggers", JSONArray(recordingTriggers.toList()))
-        put("lockedPackages", JSONArray(lockedPackages.toList()))
-        put("oneHandedModeEnabled", oneHandedModeEnabled)
-    }
-
-    fun importProfile(json: JSONObject) {
-        json.optJSONArray("quickBallActions")?.let { arr ->
-            quickBallActions = (0 until arr.length()).mapNotNull { GestureAction.fromId(arr.getString(it)) }
-        }
-        json.optJSONArray("routines")?.let { arr ->
-            routines = (0 until arr.length()).mapNotNull { Routine.fromJson(arr.getJSONObject(it)) }
-        }
-        if (json.has("shakeSensitivity")) shakeSensitivity = json.getDouble("shakeSensitivity").toFloat()
-        json.optJSONArray("recordingTriggers")?.let { arr ->
-            recordingTriggers = (0 until arr.length()).map { arr.getString(it) }.toSet()
-        }
-        json.optJSONArray("lockedPackages")?.let { arr ->
-            lockedPackages = (0 until arr.length()).map { arr.getString(it) }.toSet()
-        }
-        if (json.has("oneHandedModeEnabled")) oneHandedModeEnabled = json.getBoolean("oneHandedModeEnabled")
     }
 }

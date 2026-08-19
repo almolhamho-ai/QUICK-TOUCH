@@ -7,61 +7,50 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.quickgestures.data.AppPreferences
-import com.example.quickgestures.data.EdgeShape
-import com.example.quickgestures.data.GestureAction
+import com.example.quickgestures.data.GestureActionCatalog
+import com.example.quickgestures.services.edge.EdgeGestureShape
 
 @Composable
-fun EdgeGestureScreen(prefs: AppPreferences, onStateChanged: () -> Unit) {
-    var enabled by remember { mutableStateOf(prefs.edgeGestureEnabled) }
+fun EdgeGestureScreen(prefs: AppPreferences) {
+    var mapping by remember { mutableStateOf(prefs.edgeGestureActionMapping) }
 
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("إيماءات الحافة", style = MaterialTheme.typography.titleLarge)
+    val shapes = listOf(
+        EdgeGestureShape.STRAIGHT_LINE to "خط مستقيم",
+        EdgeGestureShape.L_CORNER to "زاوية L",
+        EdgeGestureShape.HALF_CIRCLE to "نص دائرة"
+    )
 
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("تفعيل إيماءات الحافة")
-            Switch(checked = enabled, onCheckedChange = {
-                enabled = it; prefs.edgeGestureEnabled = it; onStateChanged()
-            })
-        }
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+        Text("إيماءات الحافة", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(16.dp))
 
-        Text("اسحب من حافة الشاشة اليمين أو اليسار وارسم أحد الأشكال التالية، وحدد الإجراء المرتبط فيه:",
-            style = MaterialTheme.typography.bodyMedium)
-
-        EdgeShape.entries.forEach { shape ->
+        shapes.forEach { (shape, label) ->
             var expanded by remember { mutableStateOf(false) }
-            var current by remember { mutableStateOf(prefs.getEdgeMapping(shape)) }
+            val selectedActionId = mapping[shape.name]
+            val selectedLabel = GestureActionCatalog.byId(selectedActionId ?: "")?.displayLabel ?: "بدون ربط"
 
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
-                    Text(shapeLabel(shape), style = MaterialTheme.typography.bodyLarge)
-                    Spacer(Modifier.height(8.dp))
-                    Box {
-                        OutlinedButton(onClick = { expanded = true }) {
-                            Text(current?.label ?: "اختر إجراء")
-                        }
-                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            GestureAction.entries.forEach { action ->
-                                DropdownMenuItem(text = { Text(action.label) }, onClick = {
-                                    current = action
-                                    prefs.setEdgeMapping(shape, action)
-                                    onStateChanged()
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+            ) {
+                Text(label)
+                Box {
+                    TextButton(onClick = { expanded = true }) { Text(selectedLabel) }
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        GestureActionCatalog.all.forEach { action ->
+                            DropdownMenuItem(
+                                text = { Text(action.displayLabel) },
+                                onClick = {
+                                    mapping = mapping + (shape.name to action.id)
+                                    prefs.edgeGestureActionMapping = mapping
                                     expanded = false
-                                })
-                            }
+                                }
+                            )
                         }
                     }
                 }
             }
         }
     }
-}
-
-private fun shapeLabel(shape: EdgeShape) = when (shape) {
-    EdgeShape.LINE -> "خط مستقيم"
-    EdgeShape.CORNER_L -> "زاوية (L)"
-    EdgeShape.HALF_CIRCLE -> "نص دائرة"
 }

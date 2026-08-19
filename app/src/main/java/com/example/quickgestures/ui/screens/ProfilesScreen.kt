@@ -1,6 +1,5 @@
 package com.example.quickgestures.ui.screens
 
-import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -9,53 +8,49 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.quickgestures.data.AppPreferences
-import org.json.JSONObject
 
 @Composable
-fun ProfilesScreen(prefs: AppPreferences, onStateChanged: () -> Unit) {
+fun ProfilesScreen(onExport: () -> String, onImport: (String) -> Unit) {
     val context = LocalContext.current
-    var message by remember { mutableStateOf<String?>(null) }
+    var statusMessage by remember { mutableStateOf<String?>(null) }
 
-    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri: Uri? ->
-        uri?.let {
-            runCatching {
-                context.contentResolver.openOutputStream(it)?.use { out ->
-                    out.write(prefs.exportProfile().toString(2).toByteArray())
-                }
-                message = "تم تصدير البروفايل بنجاح"
-            }.onFailure { message = "فشل التصدير: ${it.message}" }
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.openOutputStream(uri)?.use { it.write(onExport().toByteArray()) }
+            statusMessage = "تم تصدير البروفايل بنجاح"
         }
     }
 
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
-        uri?.let {
-            runCatching {
-                context.contentResolver.openInputStream(it)?.use { input ->
-                    val text = input.readBytes().decodeToString()
-                    prefs.importProfile(JSONObject(text))
-                }
-                onStateChanged()
-                message = "تم استيراد البروفايل بنجاح"
-            }.onFailure { message = "فشل الاستيراد: ${it.message}" }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.openInputStream(uri)?.bufferedReader()?.use {
+                onImport(it.readText())
+            }
+            statusMessage = "تم استيراد البروفايل بنجاح"
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("البروفايلات", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "صدّر كل إعداداتك (الكرة، إيماءات الحافة، الروتينات، القفل...) كملف واحد لمشاركته أو الاحتفاظ فيه، أو استورد ملف من صديق.",
-            style = MaterialTheme.typography.bodyMedium
-        )
+    Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
+        Text("البروفايلات", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.height(8.dp))
+        Text("تصدير كل إعدادات التطبيق (الكرة، الروتينات، القفل...) كملف JSON واحد لمشاركته.")
+        Spacer(Modifier.height(16.dp))
 
-        Button(onClick = { exportLauncher.launch("quick_touch_profile.json") }, modifier = Modifier.fillMaxWidth()) {
-            Text("تصدير الإعدادات الحالية")
+        Button(onClick = { exportLauncher.launch("quick_touch_profile.json") }) {
+            Text("تصدير الإعدادات")
+        }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json")) }) {
+            Text("استيراد إعدادات")
         }
 
-        OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json")) }, modifier = Modifier.fillMaxWidth()) {
-            Text("استيراد ملف بروفايل")
+        statusMessage?.let {
+            Spacer(Modifier.height(16.dp))
+            Text(it, style = MaterialTheme.typography.bodyMedium)
         }
-
-        message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }

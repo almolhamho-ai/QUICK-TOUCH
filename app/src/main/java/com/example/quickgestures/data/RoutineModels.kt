@@ -1,83 +1,87 @@
 package com.example.quickgestures.data
 
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.Serializable
+import java.util.UUID
 
-enum class TriggerType { SHAKE, EDGE_GESTURE, APP_OPENED, TIME_OF_DAY, MANUAL }
-enum class EdgeShape { LINE, CORNER_L, HALF_CIRCLE }
-enum class ConditionType { TIME_RANGE, WIFI_CONNECTED, BATTERY_BELOW, MOTION_STATE, PROXIMITY_COVERED }
-enum class MotionState { STILL, WALKING, VEHICLE }
+/**
+ * مُشغّل الروتين: الحدث الذي يبدأ فحص الشروط.
+ */
+@Serializable
+sealed class RoutineTrigger {
+    @Serializable data class Shake(val placeholder: Boolean = true) : RoutineTrigger()
+    @Serializable data class EdgeGesture(val shape: String) : RoutineTrigger()
+    @Serializable data class AppOpened(val packageName: String) : RoutineTrigger()
 
-data class RoutineTrigger(
-    val type: TriggerType,
-    /** حسب النوع: شكل الحافة، اسم حزمة التطبيق، أو "HH:mm" لوقت اليوم */
-    val value: String? = null
-)
+    fun shortLabel(): String = when (this) {
+        is Shake -> "هزة"
+        is EdgeGesture -> "إيماءة حافة"
+        is AppOpened -> "فتح تطبيق"
+    }
+}
 
-data class RoutineCondition(
-    val type: ConditionType,
-    val value: String? = null // مثال: "22:00-06:00" لوقت، "30" لنسبة بطارية
-)
+/**
+ * شرط واحد. كل إجراء (ActionStep) يحمل قائمة شروطه الخاصة به،
+ * ويسمح باختيار أكثر من شرط بنفس الوقت (تُقيَّم كلها بمنطق AND).
+ */
+@Serializable
+sealed class RoutineCondition {
+    @Serializable data class TimeRange(val startMinuteOfDay: Int, val endMinuteOfDay: Int) : RoutineCondition()
+    @Serializable data class WifiState(val connected: Boolean) : RoutineCondition()
+    @Serializable data class BatteryLevel(val op: CompareOp, val percent: Int) : RoutineCondition()
+    @Serializable data class DayOfWeek(val days: Set<Int>) : RoutineCondition() // 1=الأحد..7=السبت
 
-data class Routine(
-    val id: String,
-    val name: String,
-    val trigger: RoutineTrigger,
+    fun shortLabel(): String = when (this) {
+        is TimeRange -> "الوقت"
+        is WifiState -> "الواي فاي"
+        is BatteryLevel -> "نسبة البطارية"
+        is DayOfWeek -> "أيام الأسبوع"
+    }
+}
+
+@Serializable
+enum class CompareOp { LESS_THAN, GREATER_THAN, EQUALS }
+
+/**
+ * خطوة إجراء داخل الروتين: إجراء واحد + شروطه الخاصة (اختيار متعدد، AND).
+ * إذا كانت قائمة الشروط فاضية، الإجراء ينفذ دايمًا عند تحقق المُشغّل.
+ */
+@Serializable
+data class ActionStep(
+    val id: String = UUID.randomUUID().toString(),
+    val actionId: String,
     val conditions: List<RoutineCondition> = emptyList(),
-    val actions: List<GestureActionRef>,
+    val order: Int = 0
+) {
+    fun conditionsSatisfied(evaluator: (RoutineCondition) -> Boolean): Boolean =
+        conditions.all(evaluator)
+}
+
+/**
+ * الروتين الكامل: مُشغّل واحد + عدة خطوات إجراء، كل خطوة بشروطها المستقلة.
+ * إذا ترك المستخدم الاسم فاضي، يتم توليد اسم تلقائي عند الحفظ.
+ */
+@Serializable
+data class Routine(
+    val id: String = UUID.randomUUID().toString(),
+    val userGivenName: String? = null,
+    val trigger: RoutineTrigger,
+    val actionSteps: List<ActionStep>,
     val enabled: Boolean = true
 ) {
-    fun toJson(): JSONObject = JSONObject().apply {
-        put("id", id)
-        put("name", name)
-        put("enabled", enabled)
-        put("trigger", JSONObject().apply {
-            put("type", trigger.type.name)
-            put("value", trigger.value ?: "")
-        })
-        put("conditions", JSONArray().apply {
-            conditions.forEach {
-                put(JSONObject().apply {
-                    put("type", it.type.name)
-                    put("value", it.value ?: "")
-                })
-            }
-        })
-        put("actions", JSONArray().apply {
-            actions.forEach {
-                put(JSONObject().apply {
-                    put("action", it.action.id)
-                    put("extra", it.extra ?: "")
-                })
-            }
-        })
-    }
+    /** الاسم الفعلي المعروض: اسم المستخدم إذا وُجد، وإلا اسم مولّد تلقائياً */
+    fun resolvedName(actionLookup: (String) -> GestureAction?): String {
+        if (!userGivenName.isNullOrBlank()) return userGivenName
 
-    companion object {
-        fun fromJson(o: JSONObject): Routine? {
-            val actionArr = o.optJSONArray("actions") ?: return null
-            val actions = (0 until actionArr.length()).mapNotNull { i ->
-                val a = actionArr.getJSONObject(i)
-                GestureAction.fromId(a.getString("action"))?.let { act ->
-                    GestureActionRef(act, a.optString("extra").ifBlank { null })
-                }
-            }
-            val condArr = o.optJSONArray("conditions")
-            val conditions = condArr?.let { arr ->
-                (0 until arr.length()).map { i ->
-                    val c = arr.getJSONObject(i)
-                    RoutineCondition(ConditionType.valueOf(c.getString("type")), c.optString("value").ifBlank { null })
-                }
-            } ?: emptyList()
-            val t = o.getJSONObject("trigger")
-            return Routine(
-                id = o.getString("id"),
-                name = o.getString("name"),
-                trigger = RoutineTrigger(TriggerType.valueOf(t.getString("type")), t.optString("value").ifBlank { null }),
-                conditions = conditions,
-                actions = actions,
-                enabled = o.optBoolean("enabled", true)
-            )
+        val triggerPart = trigger.shortLabel()
+        val actionNames = actionSteps
+            .sortedBy { it.order }
+            .mapNotNull { actionLookup(it.actionId)?.displayLabel }
+
+        return when {
+            actionNames.isEmpty() -> "روتين ($triggerPart)"
+            actionNames.size == 1 -> "$triggerPart ← ${actionNames.first()}"
+            else -> "$triggerPart ← ${actionNames.take(2).joinToString(" + ")}" +
+                    if (actionNames.size > 2) " (+${actionNames.size - 2})" else ""
         }
     }
 }

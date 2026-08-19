@@ -1,84 +1,169 @@
 package com.example.quickgestures.ui.components
 
-import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.view.MotionEvent
-import android.view.View
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import com.example.quickgestures.data.GestureAction
+import com.example.quickgestures.data.QuickBallRadialConfig
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.PI
 
 /**
- * نصف دائرة عند حافة الشاشة: النص الظاهر منها فيه أيقونة الإجراء الحالي،
- * سحب لفوق/تحت عالكرة نفسها بيدوّر بين الإجراءات المتاحة (حتى لو كترت)،
- * ونقرة بتنفذ الإجراء الظاهر حالياً. النص التاني من الدائرة يضل خارج حافة الشاشة تماماً.
+ * الحالة الأساسية (مغلقة): نص دائرة صغير وخفيف، نصفه برا حدود الشاشة عند الحافة.
+ * عند الضغط: ينبثق (Scale + Fade) لقائمة دائرية — دائرة مركزية بنفس مكانها،
+ * وحولها فقاعات الاختصارات موزعة على شكل دائرة كاملة بنفس المقاس، بزاوية متساوية بينهم.
+ *
+ * سحبة أفقية على الدائرة المركزية أثناء الفتح = تدوير كل الحلقة (لعرض اختصارات إضافية
+ * إذا كان عدد الاختصارات المختارة أكبر من itemsPerRing).
  */
-class QuickBallOverlayView(
-    context: Context,
-    private var actions: List<GestureAction>,
-    private val onActionSelected: (GestureAction) -> Unit,
-    private val onDragMoved: (rawX: Float, rawY: Float) -> Unit
-) : View(context) {
+@Composable
+fun QuickBallOverlayView(
+    config: QuickBallRadialConfig,
+    actionsCatalog: (String) -> GestureAction?,
+    isEdgeOnLeft: Boolean,
+    onActionTapped: (GestureAction) -> Unit,
+    onLongPressMove: (dx: Float, dy: Float) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var rotation by remember { mutableFloatStateOf(config.rotationOffsetDegrees) }
+    var dragAccumulator by remember { mutableFloatStateOf(0f) }
 
-    private var currentIndex = 0
-    private val ballPaint = Paint().apply { color = Color.argb(190, 20, 20, 20); isAntiAlias = true }
-    private val iconPaint = Paint().apply { color = Color.WHITE; isAntiAlias = true; textSize = 34f; textAlign = Paint.Align.CENTER }
+    // أنيميشن سلس للانبثاق: منحنى overshoot خفيف يعطي إحساس احترافي "spring"
+    val expandProgress by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "quickBallExpand"
+    )
 
-    private var downY = 0f
-    private var downX = 0f
-    private var isDragging = false
+    val density = LocalDensity.current
+    val centerSizeDp = config.centerBubbleSizeDp.dp
+    val satelliteSizeDp = config.satelliteBubbleSizeDp.dp
+    val collapsedSizeDp = config.collapsedSizeDp.dp
 
-    fun updateActions(newActions: List<GestureAction>) {
-        actions = newActions
-        if (currentIndex >= actions.size) currentIndex = 0
-        invalidate()
+    // نصف قطر توزيع الحلقة يتحسب من مقاس الفقاعات حتى ما تتلامس
+    val ringRadiusDp = (centerSizeDp.value * 1.9f).dp
+
+    val visibleActions = remember(config.selectedActionIds, config.itemsPerRing, rotation) {
+        config.selectedActionIds.mapNotNull(actionsCatalog).take(
+            maxOf(config.itemsPerRing, config.selectedActionIds.size)
+        )
     }
 
-    override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val radius = width.coerceAtMost(height).toFloat() / 2f
-        canvas.drawCircle(width / 2f, height / 2f, radius, ballPaint)
-        if (actions.isNotEmpty()) {
-            val label = actions[currentIndex].label.take(1)
-            canvas.drawText(label, width / 2f, height / 2f + 12f, iconPaint)
-        }
-    }
+    Box(
+        modifier = Modifier
+            .size(if (expanded) ringRadiusDp * 2 + satelliteSizeDp else collapsedSizeDp),
+        contentAlignment = Alignment.Center
+    ) {
+        // فقاعات الاختصارات حول المركز — تظهر فقط بالحالة المفتوحة، بأنيميشن تدرّجي
+        if (expandProgress > 0.01f) {
+            val angleStep = 360f / maxOf(visibleActions.size, 1)
+            visibleActions.forEachIndexed { index, action ->
+                val angleDeg = rotation + angleStep * index - 90f
+                val angleRad = angleDeg * PI.toFloat() / 180f
+                val radiusPx = with(density) { ringRadiusDp.toPx() } * expandProgress
+                val offsetX = cos(angleRad) * radiusPx
+                val offsetY = sin(angleRad) * radiusPx
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                downX = event.rawX; downY = event.rawY
-                isDragging = false
-                return true
+                Box(
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = offsetX
+                            translationY = offsetY
+                            scaleX = expandProgress
+                            scaleY = expandProgress
+                            alpha = expandProgress
+                        }
+                        .size(satelliteSizeDp)
+                        .clip(CircleShape)
+                        .pointerInput(action.id) {
+                            detectTapGestures(onTap = {
+                                onActionTapped(action)
+                                expanded = false
+                            })
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    ActionBubbleContent(action)
+                }
             }
-            MotionEvent.ACTION_MOVE -> {
-                val dy = event.rawY - downY
-                val dx = event.rawX - downX
-                if (kotlin.math.abs(dx) + kotlin.math.abs(dy) > 40) {
-                    isDragging = true
-                    // سحب عمودي قصير = تدوير بين الإجراءات، سحب طويل/بالاتجاهين = تحريك الكرة
-                    if (kotlin.math.abs(dy) in 40.0..140.0 && kotlin.math.abs(dx) < 40) {
-                        rotate(if (dy < 0) -1 else 1)
-                        downY = event.rawY
-                    } else {
-                        onDragMoved(event.rawX, event.rawY)
+        }
+
+        // الدائرة المركزية — بنفس مكانها بالحالتين، هي يلي بتفتح/تسكر وبتستقبل سحبة التدوير
+        Box(
+            modifier = Modifier
+                .size(if (expanded) centerSizeDp else collapsedSizeDp)
+                .graphicsLayer {
+                    // بالحالة المغلقة نص الدائرة برا الشاشة (نصف قطرها خارج الحافة)
+                    translationX = if (!expanded) {
+                        if (isEdgeOnLeft) -collapsedSizeDp.toPx() / 2f else collapsedSizeDp.toPx() / 2f
+                    } else 0f
+                }
+                .clip(CircleShape)
+                .pointerInput(expanded) {
+                    detectTapGestures(onTap = {
+                        if (!expanded && visibleActions.isNotEmpty()) {
+                            expanded = true
+                        } else if (expanded) {
+                            // نقرة على المركز بالحالة المفتوحة تنفذ آخر إجراء ظاهر بالمنتصف (اختياري)
+                            expanded = false
+                        }
+                    })
+                }
+                .pointerInput(expanded) {
+                    detectDragGestures(
+                        onDragStart = { dragAccumulator = 0f },
+                        onDragEnd = {
+                            if (expanded) rotation = normalizeAngle(rotation)
+                        }
+                    ) { change, dragAmount: Offset ->
+                        change.consume()
+                        if (expanded) {
+                            // سحب أفقي = تدوير الحلقة كاملة
+                            dragAccumulator += dragAmount.x
+                            rotation += dragAmount.x * 0.6f
+                        } else {
+                            // سحبة طويلة بالحالة المغلقة = تحريك موقع الكرة (كما بالنسخة القديمة)
+                            onLongPressMove(dragAmount.x, dragAmount.y)
+                        }
                     }
-                }
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                if (!isDragging && actions.isNotEmpty()) {
-                    onActionSelected(actions[currentIndex])
-                }
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
+                },
+            contentAlignment = Alignment.Center
+        )
     }
+}
 
-    private fun rotate(step: Int) {
-        if (actions.isEmpty()) return
-        currentIndex = (currentIndex + step + actions.size) % actions.size
-        invalidate()
+@Composable
+private fun ActionBubbleContent(action: GestureAction) {
+    Box(
+        modifier = Modifier
+            .clip(CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        // إذا لم يضع المستخدم أيقونة مخصصة، الحرف الأول من الاسم (يبقى كما هو بانتظار الأيقونات المخصصة)
+        Text(text = action.displayLabel.take(1))
     }
+}
+
+private fun normalizeAngle(angle: Float): Float {
+    var a = angle % 360f
+    if (a < 0f) a += 360f
+    return a
 }

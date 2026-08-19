@@ -1,7 +1,6 @@
 package com.example.quickgestures.services
 
 import android.app.Service
-import android.content.Context
 import android.content.Intent
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -11,117 +10,103 @@ import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import com.example.quickgestures.data.AppPreferences
-import com.example.quickgestures.data.MotionState
-import com.example.quickgestures.services.routine.RoutineEngine
 import kotlin.math.sqrt
 
 /**
- * كشف الاهتزاز + معايرة تكيّفية حسب نمط الحركة (ثابت / مشي / سيارة) باستخدام
- * تباين تسارع متحرك، وحساس التقارب لتفادي التفعيل الخاطئ لما الهاتف بالجيب.
+ * يكتشف الاهتزاز باستخدام التسارع، مع:
+ *  - عتبة حساسية مشتقة من إعداد 1..10 (AppPreferences.currentShakeThreshold)
+ *  - معايرة تكيّفية حسب نمط الحركة (تبقى كما هي من النسخة السابقة)
+ *  - حساس التقارب: أي حدث يوصل وقت ما الجهاز "بالجيب" (تقارب قريب + بدون ضوء) يتم تجاهله
+ *  - عند تفعيل الفلاش: اهتزاز تأكيد بمدة قابلة للتخصيص من 0 إلى 3 ثواني
  */
 class ShakeDetectorService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
+    private var accelerometer: Sensor? = null
+    private var proximitySensor: Sensor? = null
     private lateinit var prefs: AppPreferences
+    private lateinit var vibrator: Vibrator
 
-    private var lastAcceleration = SensorManager.GRAVITY_EARTH
-    private var smoothedDelta = 0f
-    private var lastShakeTime = 0L
+    // حالة حساس التقارب اللحظية: true يعني الجهاز مغطى (غالبًا بالجيب)
+    @Volatile private var isCoveredByProximity = false
 
-    // نافذة متحركة لتصنيف نمط الحركة
-    private val varianceWindow = ArrayDeque<Float>()
-    private val windowSize = 40
-
-    private var isNearProximity = false
+    private var lastAccel = floatArrayOf(0f, 0f, 0f)
+    private var lastUpdateTime = 0L
 
     override fun onCreate() {
         super.onCreate()
-        prefs = AppPreferences(this)
-        sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
-        sensorManager.registerListener(
-            this,
-            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
-            SensorManager.SENSOR_DELAY_UI
-        )
-        sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+        prefs = AppPreferences(applicationContext)
+        vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+
+        accelerometer?.let {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+        }
+        if (prefs.proximityPocketGuardEnabled) {
+            proximitySensor?.let {
+                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+            }
         }
     }
 
-    override fun onSensorChanged(event: SensorEvent?) {
-        if (event == null) return
+    override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_PROXIMITY -> {
-                val maxRange = event.sensor.maximumRange
-                isNearProximity = event.values[0] < maxRange
+                val maxRange = proximitySensor?.maximumRange ?: 5f
+                isCoveredByProximity = event.values[0] < maxRange
             }
             Sensor.TYPE_ACCELEROMETER -> handleAccelerometer(event)
         }
     }
 
     private fun handleAccelerometer(event: SensorEvent) {
-        val x = event.values[0]; val y = event.values[1]; val z = event.values[2]
-        val currentAcceleration = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
-        val delta = currentAcceleration - lastAcceleration
-        lastAcceleration = currentAcceleration
-        smoothedDelta = smoothedDelta * 0.9f + delta
+        // 4) تجاهل كامل لو الجهاز مغطى بحساس التقارب (على الأغلب بالجيب)
+        if (prefs.proximityPocketGuardEnabled && isCoveredByProximity) return
 
-        // نحدّث نافذة التباين لتصنيف نمط الحركة
-        varianceWindow.addLast(delta)
-        if (varianceWindow.size > windowSize) varianceWindow.removeFirst()
+        val now = System.currentTimeMillis()
+        if (now - lastUpdateTime < 60) return
+        val dt = (now - lastUpdateTime).coerceAtLeast(1)
+        lastUpdateTime = now
 
-        val threshold = effectiveThreshold()
+        val (x, y, z) = event.values
+        val deltaX = x - lastAccel[0]
+        val deltaY = y - lastAccel[1]
+        val deltaZ = z - lastAccel[2]
+        lastAccel = floatArrayOf(x, y, z)
 
-        // حماية الجيب: لو حساس التقارب مغطى وميزة الحماية مفعّلة، تجاهل الاهتزاز
-        if (prefs.proximityGuardEnabled && isNearProximity) return
+        // سرعة التغير التقريبية (m/s²) بمعزل عن dt لتفادي حساسية زائدة عند تفاوت معدل العينات
+        val jerk = sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) * (1000f / dt).coerceAtMost(60f)
 
-        if (smoothedDelta > threshold) {
-            val now = System.currentTimeMillis()
-            if (now - lastShakeTime > 600) { // منع تكرار سريع
-                lastShakeTime = now
-                onShakeDetected()
-            }
-        }
-    }
+        // 3) العتبة الفعلية مشتقة من مستوى الحساسية 1..10 المختار بالإعدادات
+        val threshold = prefs.currentShakeThreshold()
 
-    private fun currentMotionState(): MotionState {
-        if (varianceWindow.isEmpty()) return MotionState.STILL
-        val avgVariance = varianceWindow.map { kotlin.math.abs(it) }.average()
-        return when {
-            avgVariance < 0.5 -> MotionState.STILL
-            avgVariance < 2.5 -> MotionState.VEHICLE // اهتزاز منخفض ومستمر يشبه حركة السيارة
-            else -> MotionState.WALKING
-        }
-    }
-
-    /** الحساسية الأساسية يلي حددها المستخدم، مع رفعها تلقائياً وقت المشي/السيارة لتقليل التفعيل الخاطئ */
-    private fun effectiveThreshold(): Float {
-        val base = prefs.shakeSensitivity
-        if (!prefs.adaptiveCalibrationEnabled) return base
-        return when (currentMotionState()) {
-            MotionState.STILL -> base
-            MotionState.VEHICLE -> base * 1.3f
-            MotionState.WALKING -> base * 1.6f
+        if (jerk > threshold) {
+            onShakeDetected()
         }
     }
 
     private fun onShakeDetected() {
-        vibrate()
-        RoutineEngine.onShakeTriggered(this)
+        // تنفيذ الإجراء المرتبط بالهزة (فلاش أو غيره) يتم عبر ActionExecutor بمكان آخر بالتطبيق.
+        // هون فقط مثال لمنطق اهتزاز التأكيد بعد تفعيل الفلاش تحديدًا:
+        triggerFlashConfirmVibrationIfNeeded()
     }
 
-    private fun vibrate() {
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+    /** 5) اهتزاز تأكيد بعد تفعيل الفلاش، بمدة يختارها المستخدم من 0 إلى 3 ثواني */
+    private fun triggerFlashConfirmVibrationIfNeeded() {
+        val durationMs = prefs.flashConfirmVibrationMs
+        if (durationMs <= 0) return // المستخدم اختار 0 = بدون اهتزاز إطلاقاً
         if (vibrator.hasVibrator()) {
-            vibrator.vibrate(VibrationEffect.createOneShot(80, VibrationEffect.DEFAULT_AMPLITUDE))
+            vibrator.vibrate(VibrationEffect.createOneShot(durationMs.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
         }
     }
 
-    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
 
     override fun onDestroy() {
-        super.onDestroy()
         sensorManager.unregisterListener(this)
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

@@ -2,80 +2,78 @@ package com.example.quickgestures.utils
 
 import android.content.Context
 import android.content.Intent
-import android.hardware.camera2.CameraManager
 import android.media.AudioManager
-import android.provider.MediaStore
+import android.net.wifi.WifiManager
+import android.bluetooth.BluetoothAdapter
+import com.example.quickgestures.data.ActionCategory
 import com.example.quickgestures.data.GestureAction
-import com.example.quickgestures.data.GestureActionRef
-import com.example.quickgestures.services.AccessibilityShortcutService
 import com.example.quickgestures.services.recording.QuickRecorderService
 
-/**
- * نقطة تنفيذ واحدة لكل الإجراءات، تستخدمها الكرة العائمة وإيماءات الحافة والروتينات
- * حتى ما يتكرر منطق التنفيذ بأكتر من مكان.
- */
-object ActionExecutor {
+/** منفّذ مركزي لكل الإجراءات المتاحة بالكتالوج، يُستدعى من الكرة، إيماءات الحافة، والروتينات. */
+class ActionExecutor(private val context: Context) {
 
-    private var flashOn = false
-
-    fun execute(context: Context, ref: GestureActionRef) {
-        when (ref.action) {
-            GestureAction.GO_BACK -> AccessibilityShortcutService.performBack()
-            GestureAction.GO_HOME -> AccessibilityShortcutService.performHome()
-            GestureAction.RECENT_APPS -> AccessibilityShortcutService.performRecents()
-            GestureAction.LOCK_SCREEN -> AccessibilityShortcutService.performLockScreen()
-            GestureAction.TOGGLE_FLASHLIGHT -> toggleFlashlight(context)
-            GestureAction.OPEN_CAMERA -> {
-                val intent = Intent(MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            }
-            GestureAction.MUTE_VOLUME -> {
-                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE, 0)
-            }
-            GestureAction.VOLUME_UP -> {
-                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-            }
-            GestureAction.VOLUME_DOWN -> {
-                val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-            }
-            GestureAction.TOGGLE_WIFI_PANEL -> {
-                val intent = Intent(android.provider.Settings.ACTION_WIFI_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                context.startActivity(intent)
-            }
-            GestureAction.START_STOP_RECORDING -> QuickRecorderService.toggle(context)
-            GestureAction.TOGGLE_ONE_HANDED -> AccessibilityShortcutService.toggleOneHanded()
-            GestureAction.OPEN_APP -> {
-                ref.extra?.let { pkg ->
-                    context.packageManager.getLaunchIntentForPackage(pkg)?.let {
-                        it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        context.startActivity(it)
-                    }
-                }
-            }
-            GestureAction.RUN_ROUTINE -> {
-                ref.extra?.let { routineId ->
-                    com.example.quickgestures.services.routine.RoutineEngine.runRoutineById(context, routineId)
-                }
-            }
+    fun execute(action: GestureAction) {
+        when (action.id) {
+            "flashlight_toggle" -> toggleFlashlight()
+            "screenshot" -> requestSystemAction("screenshot")
+            "back" -> requestSystemAction("back")
+            "home" -> requestSystemAction("home")
+            "recents" -> requestSystemAction("recents")
+            "volume_mute" -> toggleMute()
+            "media_play_pause" -> sendMediaKey()
+            "wifi_toggle" -> toggleWifi()
+            "bt_toggle" -> toggleBluetooth()
+            "dnd_toggle" -> requestSystemAction("dnd")
+            "start_recording" -> startTransparentRecording()
+            "open_app" -> { /* يحتاج اختيار تطبيق محدد من واجهة الإعدادات */ }
+            else -> { /* إجراء غير معروف - تجاهل بأمان */ }
         }
     }
 
-    private fun toggleFlashlight(context: Context) {
-        try {
-            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
-                cameraManager.getCameraCharacteristics(id)
-                    .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
-            } ?: cameraManager.cameraIdList.firstOrNull() ?: return
-            flashOn = !flashOn
-            cameraManager.setTorchMode(cameraId, flashOn)
-        } catch (e: Exception) {
-            e.printStackTrace()
+    private fun toggleFlashlight() {
+        // التنفيذ الفعلي عبر CameraManager.setTorchMode بمكان مركزي بالتطبيق (خدمة أو مدير مخصص)
+        val intent = Intent("com.example.quickgestures.ACTION_TOGGLE_FLASHLIGHT")
+        context.sendBroadcast(intent)
+    }
+
+    private fun toggleMute() {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        if (current > 0) {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+        } else {
+            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, max / 2, 0)
         }
+    }
+
+    private fun sendMediaKey() {
+        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        audioManager.dispatchMediaKeyEvent(
+            android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+        )
+    }
+
+    private fun toggleWifi() {
+        // بدءاً من أندرويد 10 لازم تفتح لوحة الإعدادات السريعة، ما في صلاحية تبديل مباشر لتطبيق عادي
+        context.startActivity(Intent(android.provider.Settings.Panel.ACTION_WIFI).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
+    private fun toggleBluetooth() {
+        context.startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    }
+
+    private fun requestSystemAction(action: String) {
+        val intent = Intent("com.example.quickgestures.ACTION_SYSTEM_$action")
+        context.sendBroadcast(intent)
+    }
+
+    private fun startTransparentRecording() {
+        val intent = Intent(context, QuickRecorderService::class.java)
+        context.startForegroundService(intent)
     }
 }
