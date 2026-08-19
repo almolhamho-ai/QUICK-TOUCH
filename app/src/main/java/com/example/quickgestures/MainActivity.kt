@@ -84,7 +84,7 @@ class MainActivity : ComponentActivity() {
 fun MainAppStructure(prefs: AppPreferences, onRequestOverlayPermission: () -> Unit) {
     val navController = rememberNavController()
     var refreshKey by remember { mutableIntStateOf(0) }
-    val onStateChanged = { refreshKey++ }
+    val onStateChanged: () -> Unit = { refreshKey++ }
 
     Scaffold(
         topBar = {
