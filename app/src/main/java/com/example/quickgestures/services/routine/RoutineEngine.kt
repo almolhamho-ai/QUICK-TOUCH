@@ -1,18 +1,14 @@
 package com.example.quickgestures.services.routine
 
-import com.example.quickgestures.data.ActionStep
 import com.example.quickgestures.data.CompareOp
 import com.example.quickgestures.data.GestureActionCatalog
+import com.example.quickgestures.data.OrientationOption
+import com.example.quickgestures.data.RingerModeOption
 import com.example.quickgestures.data.Routine
 import com.example.quickgestures.data.RoutineCondition
 import com.example.quickgestures.utils.ActionExecutor
 import java.util.Calendar
 
-/**
- * عند تحقق مُشغّل الروتين: يمر على كل ActionStep على حدة، ويفحص شروطه الخاصة فقط.
- * هيك ممكن يكون بروتين واحد أكثر من إجراء، كل إجراء إله شروط مختلفة تمامًا،
- * وممكن ينفذ إجراء أو أكثر بنفس الوقت إذا تحققت شروط كل واحد منهم.
- */
 class RoutineEngine(
     private val actionExecutor: ActionExecutor,
     private val liveStateProvider: LiveStateProvider
@@ -38,11 +34,15 @@ class RoutineEngine(
             if (condition.startMinuteOfDay <= condition.endMinuteOfDay) {
                 nowMinutes in condition.startMinuteOfDay..condition.endMinuteOfDay
             } else {
-                // مدى يعبر منتصف الليل
                 nowMinutes >= condition.startMinuteOfDay || nowMinutes <= condition.endMinuteOfDay
             }
         }
-        is RoutineCondition.WifiState -> liveStateProvider.isWifiConnected() == condition.connected
+        is RoutineCondition.WifiState -> {
+            val connected = liveStateProvider.isWifiConnected()
+            if (connected != condition.connected) return@evaluateCondition false
+            if (condition.specificSsid.isNullOrBlank()) true
+            else liveStateProvider.currentWifiSsid() == condition.specificSsid
+        }
         is RoutineCondition.BatteryLevel -> {
             val current = liveStateProvider.currentBatteryPercent()
             when (condition.op) {
@@ -51,10 +51,15 @@ class RoutineEngine(
                 CompareOp.EQUALS -> current == condition.percent
             }
         }
+        is RoutineCondition.ChargingState -> liveStateProvider.isCharging() == condition.isCharging
         is RoutineCondition.DayOfWeek -> {
             val today = Calendar.getInstance().get(Calendar.DAY_OF_WEEK)
             today in condition.days
         }
+        is RoutineCondition.RingerModeState -> liveStateProvider.currentRingerMode() == condition.mode
+        is RoutineCondition.HeadsetState -> liveStateProvider.isHeadsetConnected() == condition.connected
+        is RoutineCondition.BluetoothState -> liveStateProvider.isBluetoothConnected() == condition.connected
+        is RoutineCondition.ScreenOrientationState -> liveStateProvider.currentOrientation() == condition.orientation
     }
 
     private fun currentMinuteOfDay(): Int {
@@ -63,8 +68,14 @@ class RoutineEngine(
     }
 }
 
-/** مصدر قراءة الحالة اللحظية للجهاز (واي فاي/بطارية)، يُمرَّر كتبعية لسهولة الاختبار */
+/** مصدر قراءة الحالة اللحظية للجهاز، يُمرَّر كتبعية لسهولة الاختبار والتوسعة المستقبلية */
 interface LiveStateProvider {
     fun isWifiConnected(): Boolean
+    fun currentWifiSsid(): String?
     fun currentBatteryPercent(): Int
+    fun isCharging(): Boolean
+    fun currentRingerMode(): RingerModeOption
+    fun isHeadsetConnected(): Boolean
+    fun isBluetoothConnected(): Boolean
+    fun currentOrientation(): OrientationOption
 }
