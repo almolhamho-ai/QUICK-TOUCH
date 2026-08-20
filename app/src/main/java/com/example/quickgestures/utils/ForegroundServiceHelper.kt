@@ -3,6 +3,7 @@ package com.example.quickgestures.utils
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.Context
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.quickgestures.R
@@ -20,7 +21,7 @@ fun Service.buildAndStartSilentForegroundNotification(
 ) {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         val channel = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_MIN)
-        (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).createNotificationChannel(channel)
     }
 
     val notification = NotificationCompat.Builder(this, channelId)
