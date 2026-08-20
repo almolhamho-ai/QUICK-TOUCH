@@ -39,9 +39,13 @@ class RoutineEngine(
         }
         is RoutineCondition.WifiState -> {
             val connected = liveStateProvider.isWifiConnected()
-            if (connected != condition.connected) return@evaluateCondition false
-            if (condition.specificSsid.isNullOrBlank()) true
-            else liveStateProvider.currentWifiSsid() == condition.specificSsid
+            if (connected != condition.connected) {
+                false
+            } else if (condition.specificSsid.isNullOrBlank()) {
+                true
+            } else {
+                liveStateProvider.currentWifiSsid() == condition.specificSsid
+            }
         }
         is RoutineCondition.BatteryLevel -> {
             val current = liveStateProvider.currentBatteryPercent()
