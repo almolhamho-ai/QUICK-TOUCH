@@ -95,6 +95,23 @@ class AppPreferences(context: Context) {
         set(value) = prefs.edit().putString("network_speed_mode", value.name).apply()
 
     // ---------------------------------------------------------------------
+    // تفعيل/تعطيل الكرة العائمة + وضعية العمل (جوا التطبيق فقط / Overlay على مستوى النظام)
+    // ---------------------------------------------------------------------
+    enum class QuickBallMode { IN_APP_ONLY, SYSTEM_WIDE_OVERLAY }
+
+    var quickBallEnabled: Boolean
+        get() = prefs.getBoolean("quick_ball_enabled", false)
+        set(value) = prefs.edit().putBoolean("quick_ball_enabled", value).apply()
+
+    var quickBallMode: QuickBallMode
+        get() = try {
+            QuickBallMode.valueOf(prefs.getString("quick_ball_mode", QuickBallMode.IN_APP_ONLY.name)!!)
+        } catch (e: Exception) {
+            QuickBallMode.IN_APP_ONLY
+        }
+        set(value) = prefs.edit().putString("quick_ball_mode", value.name).apply()
+
+    // ---------------------------------------------------------------------
     // 2) إعدادات الكرة الدائرية (Radial Quick Ball)
     // ---------------------------------------------------------------------
     var quickBallRadialConfig: QuickBallRadialConfig
