@@ -3,6 +3,7 @@ package com.example.quickgestures.ui.screens
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.quickgestures.data.AppPreferences
@@ -40,5 +41,3 @@ fun NetworkSpeedScreen(prefs: AppPreferences) {
         }
     }
 }
-
-private typealias Alignment = androidx.compose.ui.Alignment
