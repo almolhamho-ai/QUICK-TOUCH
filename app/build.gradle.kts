@@ -4,6 +4,12 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+// رقم الإصدار يزيد تلقائياً مع كل بناء عبر GitHub Actions (GITHUB_RUN_NUMBER يزيد بكل تشغيل
+// تلقائياً من GitHub نفسو)، وبيرجع لقيمة ثابتة 100 بس إذا بنيت المشروع محلياً بدون CI.
+// هيك كل APK جديد فيه رقم إصدار أعلى من يلي قبلو، فبيقدر يركب فوق النسخة القديمة بدون
+// ما تضطر تحذف التطبيق يدوياً قبل كل تجربة.
+val autoVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 100
+
 android {
     namespace = "com.example.quickgestures"
     compileSdk = 34
@@ -12,8 +18,8 @@ android {
         applicationId = "com.example.quickgestures"
         minSdk = 26
         targetSdk = 34
-        versionCode = 100
-        versionName = "1.0.0"
+        versionCode = autoVersionCode
+        versionName = "1.0.$autoVersionCode"
     }
 
     buildFeatures {
