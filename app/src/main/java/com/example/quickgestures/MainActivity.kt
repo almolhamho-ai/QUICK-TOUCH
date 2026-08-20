@@ -12,15 +12,20 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.quickgestures.data.AppPreferences
+import com.example.quickgestures.data.GestureActionCatalog
+import com.example.quickgestures.ui.components.QuickBallOverlayView
 import com.example.quickgestures.ui.screens.*
+import com.example.quickgestures.utils.ActionExecutor
 import com.example.quickgestures.utils.AppLockManager
 
 class MainActivity : ComponentActivity() {
@@ -43,8 +48,36 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    val navController = rememberNavController()
-                    QuickTouchNavHost(navController, prefs, lockManager)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        val navController = rememberNavController()
+                        QuickTouchNavHost(navController, prefs, lockManager)
+
+                        // الكرة العائمة "جوا التطبيق بس" — نعيد قراءة الإعداد كل ما تغيّرت الشاشة الحالية
+                        // (يعني كل ما ترجع من شاشة إعدادات الكرة بعد التفعيل، بتنعكس الحالة هون فوراً)
+                        val backStackEntry by navController.currentBackStackEntryAsState()
+                        var ballEnabled by remember { mutableStateOf(prefs.quickBallEnabled) }
+                        var ballMode by remember { mutableStateOf(prefs.quickBallMode) }
+                        LaunchedEffect(backStackEntry) {
+                            ballEnabled = prefs.quickBallEnabled
+                            ballMode = prefs.quickBallMode
+                        }
+
+                        if (ballEnabled && ballMode == AppPreferences.QuickBallMode.IN_APP_ONLY) {
+                            val actionExecutor = remember { ActionExecutor(applicationContext) }
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.CenterEnd
+                            ) {
+                                QuickBallOverlayView(
+                                    config = prefs.quickBallRadialConfig,
+                                    actionsCatalog = GestureActionCatalog::byId,
+                                    isEdgeOnLeft = false,
+                                    onActionTapped = { action -> actionExecutor.execute(action) },
+                                    onLongPressMove = { _, _ -> /* التحريك جوا التطبيق غير مدعوم حالياً */ }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
