@@ -12,6 +12,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import com.example.quickgestures.data.AppPreferences
 import com.example.quickgestures.data.NetworkSpeedDisplayMode
+import com.example.quickgestures.utils.buildAndStartSilentForegroundNotification
 
 /**
  * مؤشر عائم شفاف يرتسم فوق منطقة شريط الحالة (بدون Root ما فيه طريقة لحقن أيقونة فعلية
@@ -37,6 +38,12 @@ class NetworkSpeedService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        buildAndStartSilentForegroundNotification(
+            notificationId = 4203,
+            channelId = "quick_touch_network_speed_channel",
+            channelName = "Quick Touch - مراقب السرعة",
+            contentText = "مراقبة سرعة الإنترنت تعمل"
+        )
         prefs = AppPreferences(applicationContext)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         setupOverlay()

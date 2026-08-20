@@ -5,14 +5,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Intent
 import com.example.quickgestures.data.AppPreferences
+import com.example.quickgestures.services.ShakeDetectorService
 
 @Composable
 fun AutoCalibrationScreen(prefs: AppPreferences) {
+    val context = LocalContext.current
+    var shakeEnabled by remember { mutableStateOf(prefs.shakeDetectorEnabled) }
     var sensitivity by remember { mutableIntStateOf(prefs.shakeSensitivityLevel) }
     var proximityGuard by remember { mutableStateOf(prefs.proximityPocketGuardEnabled) }
     var flashVibrationMs by remember { mutableIntStateOf(prefs.flashConfirmVibrationMs) }
+
+    fun applyShakeEnabled(newEnabled: Boolean) {
+        prefs.shakeDetectorEnabled = newEnabled
+        val intent = Intent(context, ShakeDetectorService::class.java)
+        if (newEnabled) context.startForegroundService(intent) else context.stopService(intent)
+    }
 
     Column(
         modifier = Modifier
@@ -20,6 +31,22 @@ fun AutoCalibrationScreen(prefs: AppPreferences) {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
+        // تفعيل خدمة كشف الاهتزاز — كانت ناقصة تماماً وهي سبب عدم عمل الهزة إطلاقاً
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("تفعيل كشف الاهتزاز", style = MaterialTheme.typography.titleMedium)
+                Text("لازم يكون مفعّل حتى تشتغل الهزة كمُشغّل لأي روتين أو إجراء.", style = MaterialTheme.typography.bodySmall)
+            }
+            Switch(
+                checked = shakeEnabled,
+                onCheckedChange = { checked -> shakeEnabled = checked; applyShakeEnabled(checked) }
+            )
+        }
+
         // 3) حساسية الاهتزاز: 1 (صعب) → 10 (سهل)، أعداد طبيعية فقط
         Column {
             Text("حساسية الاهتزاز: $sensitivity / 10", style = MaterialTheme.typography.titleMedium)

@@ -11,6 +11,7 @@ import android.view.WindowManager
 import com.example.quickgestures.data.AppPreferences
 import com.example.quickgestures.data.GestureActionCatalog
 import com.example.quickgestures.utils.ActionExecutor
+import com.example.quickgestures.utils.buildAndStartSilentForegroundNotification
 import kotlin.math.abs
 
 enum class EdgeGestureShape { STRAIGHT_LINE, L_CORNER, HALF_CIRCLE }
@@ -25,6 +26,12 @@ class EdgeGestureService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        buildAndStartSilentForegroundNotification(
+            notificationId = 4204,
+            channelId = "quick_touch_edge_gesture_channel",
+            channelName = "Quick Touch - إيماءات الحافة",
+            contentText = "إيماءات الحافة تعمل"
+        )
         prefs = AppPreferences(applicationContext)
         actionExecutor = ActionExecutor(applicationContext)
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager

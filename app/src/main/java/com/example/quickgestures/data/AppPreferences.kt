@@ -112,6 +112,18 @@ class AppPreferences(context: Context) {
         set(value) = prefs.edit().putString("quick_ball_mode", value.name).apply()
 
     // ---------------------------------------------------------------------
+    // تفعيل خدمة إيماءات الحافة وخدمة كشف الاهتزاز (كانتا موجودتين بالكود
+    // بس بدون زر تشغيل فعلي، فهيك ما كانتا تشتغلا أبداً)
+    // ---------------------------------------------------------------------
+    var edgeGestureEnabled: Boolean
+        get() = prefs.getBoolean("edge_gesture_enabled", false)
+        set(value) = prefs.edit().putBoolean("edge_gesture_enabled", value).apply()
+
+    var shakeDetectorEnabled: Boolean
+        get() = prefs.getBoolean("shake_detector_enabled", false)
+        set(value) = prefs.edit().putBoolean("shake_detector_enabled", value).apply()
+
+    // ---------------------------------------------------------------------
     // 2) إعدادات الكرة الدائرية (Radial Quick Ball)
     // ---------------------------------------------------------------------
     var quickBallRadialConfig: QuickBallRadialConfig

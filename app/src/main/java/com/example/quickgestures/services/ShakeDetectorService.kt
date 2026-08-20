@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import com.example.quickgestures.data.AppPreferences
+import com.example.quickgestures.utils.buildAndStartSilentForegroundNotification
 import kotlin.math.sqrt
 
 /**
@@ -35,6 +36,12 @@ class ShakeDetectorService : Service(), SensorEventListener {
 
     override fun onCreate() {
         super.onCreate()
+        buildAndStartSilentForegroundNotification(
+            notificationId = 4205,
+            channelId = "quick_touch_shake_detector_channel",
+            channelName = "Quick Touch - كشف الاهتزاز",
+            contentText = "كشف الاهتزاز يعمل"
+        )
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
