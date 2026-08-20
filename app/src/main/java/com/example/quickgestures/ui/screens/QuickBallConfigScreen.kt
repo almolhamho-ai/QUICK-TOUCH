@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.quickgestures.data.AppPreferences
@@ -62,6 +63,3 @@ fun QuickBallConfigScreen(prefs: AppPreferences) {
         )
     }
 }
-
-// استيراد Alignment هنا لتفادي تضارب أسماء مع Compose الأساسي
-private typealias Alignment = androidx.compose.ui.Alignment
