@@ -4,4 +4,6 @@
     <string name="accessibility_service_label">Quick Touch Shortcuts Service</string>
     <string name="recording_service_channel">Quick Touch Recording</string>
     <string name="network_speed_service_channel">Quick Touch Speed Monitor</string>
+    <string name="quick_tile_1_label">Quick Touch 1</string>
+    <string name="quick_tile_2_label">Quick Touch 2</string>
 </resources>

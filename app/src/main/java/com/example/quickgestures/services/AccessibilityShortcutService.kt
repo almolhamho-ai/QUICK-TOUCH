@@ -2,13 +2,17 @@ package com.example.quickgestures.services
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import com.example.quickgestures.ui.AppLockActivity
 import com.example.quickgestures.utils.AppLockManager
 
 /**
- * ينفّذ الأزرار العامة (رجوع/هوم) المطلوبة من ActionExecutor، ويراقب أي تطبيق يُفتح
- * لإنفاذ قفل التطبيقات إذا كان محددًا بقائمة AppLockManager.lockedPackages.
+ * ينفّذ الأزرار العامة (رجوع/هوم/التطبيقات الأخيرة/لقطة شاشة) المطلوبة من ActionExecutor،
+ * ويراقب أي تطبيق يُفتح لإنفاذ قفل التطبيقات إذا كان محددًا بقائمة AppLockManager.lockedPackages.
+ *
+ * لازم المستخدم يفعّلها يدوياً من: الإعدادات > تسهيل الاستخدام (Accessibility) — هاد قيد
+ * أمني إجباري من أندرويد نفسو، ما فيه طريقة لتفعيلها تلقائياً من داخل أي تطبيق عادي.
  */
 class AccessibilityShortcutService : AccessibilityService() {
 
@@ -18,6 +22,7 @@ class AccessibilityShortcutService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         lockManager = AppLockManager(applicationContext)
+        instance = this
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -38,5 +43,22 @@ class AccessibilityShortcutService : AccessibilityService() {
     fun performHome() = performGlobalAction(GLOBAL_ACTION_HOME)
     fun performRecents() = performGlobalAction(GLOBAL_ACTION_RECENTS)
 
+    fun performScreenshot() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
+        }
+    }
+
     override fun onInterrupt() = Unit
+
+    override fun onDestroy() {
+        if (instance == this) instance = null
+        super.onDestroy()
+    }
+
+    companion object {
+        /** مرجع للخدمة الشغالة حالياً، يستخدمه ActionExecutor لتنفيذ الأزرار العامة مباشرة */
+        var instance: AccessibilityShortcutService? = null
+            private set
+    }
 }

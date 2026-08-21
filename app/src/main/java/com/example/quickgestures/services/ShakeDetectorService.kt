@@ -10,16 +10,11 @@ import android.os.IBinder
 import android.os.VibrationEffect
 import android.os.Vibrator
 import com.example.quickgestures.data.AppPreferences
+import com.example.quickgestures.data.GestureActionCatalog
+import com.example.quickgestures.utils.ActionExecutor
 import com.example.quickgestures.utils.buildAndStartSilentForegroundNotification
 import kotlin.math.sqrt
 
-/**
- * يكتشف الاهتزاز باستخدام التسارع، مع:
- *  - عتبة حساسية مشتقة من إعداد 1..10 (AppPreferences.currentShakeThreshold)
- *  - معايرة تكيّفية حسب نمط الحركة (تبقى كما هي من النسخة السابقة)
- *  - حساس التقارب: أي حدث يوصل وقت ما الجهاز "بالجيب" (تقارب قريب + بدون ضوء) يتم تجاهله
- *  - عند تفعيل الفلاش: اهتزاز تأكيد بمدة قابلة للتخصيص من 0 إلى 3 ثواني
- */
 class ShakeDetectorService : Service(), SensorEventListener {
 
     private lateinit var sensorManager: SensorManager
@@ -27,12 +22,13 @@ class ShakeDetectorService : Service(), SensorEventListener {
     private var proximitySensor: Sensor? = null
     private lateinit var prefs: AppPreferences
     private lateinit var vibrator: Vibrator
+    private lateinit var actionExecutor: ActionExecutor
 
-    // حالة حساس التقارب اللحظية: true يعني الجهاز مغطى (غالبًا بالجيب)
     @Volatile private var isCoveredByProximity = false
 
     private var lastAccel = floatArrayOf(0f, 0f, 0f)
     private var lastUpdateTime = 0L
+    private var lastShakeTriggeredAt = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -47,14 +43,11 @@ class ShakeDetectorService : Service(), SensorEventListener {
         proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY)
         prefs = AppPreferences(applicationContext)
         vibrator = getSystemService(VIBRATOR_SERVICE) as Vibrator
+        actionExecutor = ActionExecutor(applicationContext)
 
-        accelerometer?.let {
-            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-        }
+        accelerometer?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
         if (prefs.proximityPocketGuardEnabled) {
-            proximitySensor?.let {
-                sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
-            }
+            proximitySensor?.let { sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL) }
         }
     }
 
@@ -69,7 +62,6 @@ class ShakeDetectorService : Service(), SensorEventListener {
     }
 
     private fun handleAccelerometer(event: SensorEvent) {
-        // 4) تجاهل كامل لو الجهاز مغطى بحساس التقارب (على الأغلب بالجيب)
         if (prefs.proximityPocketGuardEnabled && isCoveredByProximity) return
 
         val now = System.currentTimeMillis()
@@ -83,27 +75,25 @@ class ShakeDetectorService : Service(), SensorEventListener {
         val deltaZ = z - lastAccel[2]
         lastAccel = floatArrayOf(x, y, z)
 
-        // سرعة التغير التقريبية (m/s²) بمعزل عن dt لتفادي حساسية زائدة عند تفاوت معدل العينات
         val jerk = sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) * (1000f / dt).coerceAtMost(60f)
-
-        // 3) العتبة الفعلية مشتقة من مستوى الحساسية 1..10 المختار بالإعدادات
         val threshold = prefs.currentShakeThreshold()
 
-        if (jerk > threshold) {
+        if (jerk > threshold && now - lastShakeTriggeredAt > 1200) {
+            lastShakeTriggeredAt = now
             onShakeDetected()
         }
     }
 
+    /** 6) الهزة صارت تنفّذ أي إجراء يختاره المستخدم (افتراضياً الفلاش)، مش بس الفلاش دايماً */
     private fun onShakeDetected() {
-        // تنفيذ الإجراء المرتبط بالهزة (فلاش أو غيره) يتم عبر ActionExecutor بمكان آخر بالتطبيق.
-        // هون فقط مثال لمنطق اهتزاز التأكيد بعد تفعيل الفلاش تحديدًا:
-        triggerFlashConfirmVibrationIfNeeded()
+        GestureActionCatalog.byId(prefs.shakeTargetActionId)?.let { actionExecutor.execute(it) }
+        triggerConfirmVibrationIfEnabled()
     }
 
-    /** 5) اهتزاز تأكيد بعد تفعيل الفلاش، بمدة يختارها المستخدم من 0 إلى 3 ثواني */
-    private fun triggerFlashConfirmVibrationIfNeeded() {
+    private fun triggerConfirmVibrationIfEnabled() {
+        if (!prefs.flashVibrationEnabled) return
         val durationMs = prefs.flashConfirmVibrationMs
-        if (durationMs <= 0) return // المستخدم اختار 0 = بدون اهتزاز إطلاقاً
+        if (durationMs <= 0) return
         if (vibrator.hasVibrator()) {
             vibrator.vibrate(VibrationEffect.createOneShot(durationMs.toLong(), VibrationEffect.DEFAULT_AMPLITUDE))
         }

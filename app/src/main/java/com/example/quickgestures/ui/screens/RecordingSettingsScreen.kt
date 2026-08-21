@@ -1,45 +1,81 @@
 package com.example.quickgestures.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.quickgestures.services.recording.QuickRecorderService
+import com.example.quickgestures.utils.AppLockManager
 
 @Composable
 fun RecordingSettingsScreen() {
-    var ballTrigger by remember { mutableStateOf(true) }
-    var shakeTrigger by remember { mutableStateOf(false) }
-    var edgeTrigger by remember { mutableStateOf(false) }
-    var notificationTrigger by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    val lockManager = remember { AppLockManager(context.applicationContext) }
+    var pinSet by remember { mutableStateOf(lockManager.hasInternalPinSet()) }
+    var isRecording by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().padding(20.dp)) {
-        Text("التسجيل الصوتي الشفاف", style = MaterialTheme.typography.headlineSmall)
+        Text("التسجيل الصوتي", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.height(8.dp))
-        Text(
-            "إشعار دائم لا يمكن إخفاؤه يظهر طول فترة التسجيل. جودة عالية: AAC 128kbps / 44.1kHz. " +
-                "الملفات محفوظة بمجلد محمي دائماً بقفل التطبيق.",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Spacer(Modifier.height(16.dp))
-        Text("طرق التفعيل", style = MaterialTheme.typography.titleMedium)
+        Text("تسجيل صوت بجودة عالية.", style = MaterialTheme.typography.bodyMedium)
+        Text("المجلد: محفوظ التسجيلات", style = MaterialTheme.typography.bodyMedium)
 
-        ToggleRow("من الكرة العائمة", ballTrigger) { ballTrigger = it }
-        ToggleRow("بالهزة", shakeTrigger) { shakeTrigger = it }
-        ToggleRow("بإيماءة الحافة", edgeTrigger) { edgeTrigger = it }
-        ToggleRow("زر بالإشعار", notificationTrigger) { notificationTrigger = it }
+        Spacer(Modifier.height(24.dp))
+
+        if (!pinSet) {
+            PinSetupSection(lockManager) { pinSet = true }
+        } else {
+            Button(onClick = {
+                if (isRecording) {
+                    context.stopService(Intent(context, QuickRecorderService::class.java))
+                } else {
+                    context.startForegroundService(Intent(context, QuickRecorderService::class.java))
+                }
+                isRecording = !isRecording
+            }) {
+                Text(if (isRecording) "إيقاف التسجيل" else "بدء التسجيل الآن")
+            }
+        }
     }
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
-    ) {
-        Text(label)
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+private fun PinSetupSection(lockManager: AppLockManager, onDone: () -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf(false) }
+
+    Column {
+        OutlinedTextField(
+            value = pin,
+            onValueChange = { pin = it; error = false },
+            label = { Text("رمز PIN") },
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = confirmPin,
+            onValueChange = { confirmPin = it; error = false },
+            label = { Text("تأكيد الرمز") },
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        if (error) {
+            Text("الرمزين مش متطابقين", color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(Modifier.height(12.dp))
+        Button(onClick = {
+            if (pin.isNotBlank() && pin == confirmPin) {
+                lockManager.setInternalPin(pin)
+                onDone()
+            } else {
+                error = true
+            }
+        }) { Text("حفظ") }
     }
 }

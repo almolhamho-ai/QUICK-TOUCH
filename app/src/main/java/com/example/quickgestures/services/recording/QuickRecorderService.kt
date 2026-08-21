@@ -35,7 +35,7 @@ class QuickRecorderService : Service() {
     }
 
     private fun startRecording() {
-        val outputDir = File(filesDir, "secure_recordings").apply { mkdirs() }
+        val outputDir = File(filesDir, "محفوظ_التسجيلات").apply { mkdirs() }
         val fileName = "REC_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}.m4a"
         val outputFile = File(outputDir, fileName)
 

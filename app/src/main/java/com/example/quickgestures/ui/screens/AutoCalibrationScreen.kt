@@ -1,5 +1,6 @@
 package com.example.quickgestures.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -7,8 +8,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import android.content.Intent
 import com.example.quickgestures.data.AppPreferences
+import com.example.quickgestures.data.GestureActionCatalog
 import com.example.quickgestures.services.ShakeDetectorService
 
 @Composable
@@ -17,7 +18,8 @@ fun AutoCalibrationScreen(prefs: AppPreferences) {
     var shakeEnabled by remember { mutableStateOf(prefs.shakeDetectorEnabled) }
     var sensitivity by remember { mutableIntStateOf(prefs.shakeSensitivityLevel) }
     var proximityGuard by remember { mutableStateOf(prefs.proximityPocketGuardEnabled) }
-    var flashVibrationMs by remember { mutableIntStateOf(prefs.flashConfirmVibrationMs) }
+    var shakeAction by remember { mutableStateOf(prefs.shakeTargetActionId) }
+    var actionMenuExpanded by remember { mutableStateOf(false) }
 
     fun applyShakeEnabled(newEnabled: Boolean) {
         prefs.shakeDetectorEnabled = newEnabled
@@ -26,79 +28,65 @@ fun AutoCalibrationScreen(prefs: AppPreferences) {
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp)
+        modifier = Modifier.fillMaxSize().padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp)
     ) {
-        // تفعيل خدمة كشف الاهتزاز — كانت ناقصة تماماً وهي سبب عدم عمل الهزة إطلاقاً
+        Text("الهزة", style = MaterialTheme.typography.headlineSmall)
+
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("تفعيل كشف الاهتزاز", style = MaterialTheme.typography.titleMedium)
-                Text("لازم يكون مفعّل حتى تشتغل الهزة كمُشغّل لأي روتين أو إجراء.", style = MaterialTheme.typography.bodySmall)
-            }
-            Switch(
-                checked = shakeEnabled,
-                onCheckedChange = { checked -> shakeEnabled = checked; applyShakeEnabled(checked) }
-            )
+            Text("تفعيل", style = MaterialTheme.typography.titleMedium)
+            Switch(checked = shakeEnabled, onCheckedChange = { checked -> shakeEnabled = checked; applyShakeEnabled(checked) })
         }
 
-        // 3) حساسية الاهتزاز: 1 (صعب) → 10 (سهل)، أعداد طبيعية فقط
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("الإجراء")
+            Box {
+                TextButton(onClick = { actionMenuExpanded = true }) {
+                    Text(GestureActionCatalog.byId(shakeAction)?.displayLabel ?: "اختر")
+                }
+                DropdownMenu(expanded = actionMenuExpanded, onDismissRequest = { actionMenuExpanded = false }) {
+                    GestureActionCatalog.all.forEach { action ->
+                        DropdownMenuItem(
+                            text = { Text(action.displayLabel) },
+                            onClick = {
+                                shakeAction = action.id
+                                prefs.shakeTargetActionId = action.id
+                                actionMenuExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
         Column {
-            Text("حساسية الاهتزاز: $sensitivity / 10", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "كل ما اقتربت من 1 صار تفعيل الهزة أصعب، وكل ما اقتربت من 10 صار أسهل.",
-                style = MaterialTheme.typography.bodySmall
-            )
+            Text("الحساسية: $sensitivity / 10")
             Slider(
                 value = sensitivity.toFloat(),
                 onValueChange = { sensitivity = it.toInt() },
                 onValueChangeFinished = { prefs.shakeSensitivityLevel = sensitivity },
                 valueRange = AppPreferences.SENSITIVITY_MIN.toFloat()..AppPreferences.SENSITIVITY_MAX.toFloat(),
-                steps = (AppPreferences.SENSITIVITY_MAX - AppPreferences.SENSITIVITY_MIN) - 1 // يقفل القيم على أعداد صحيحة
+                steps = (AppPreferences.SENSITIVITY_MAX - AppPreferences.SENSITIVITY_MIN) - 1
             )
         }
 
-        // 4) حماية الجيب عبر حساس التقارب
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Column(Modifier.weight(1f)) {
-                Text("تجاهل الهزة بالجيب", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "يستخدم حساس التقارب لمعرفة إذا الجهاز مغطى (بالجيب) ويمنع التفعيل الخاطئ.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            }
+            Text("تجاهل الهز بالجيب")
             Switch(
                 checked = proximityGuard,
-                onCheckedChange = {
-                    proximityGuard = it
-                    prefs.proximityPocketGuardEnabled = it
-                }
-            )
-        }
-
-        // 5) زمن اهتزاز التأكيد بعد تفعيل الفلاش: 0..3 ثواني
-        Column {
-            val seconds = flashVibrationMs / 1000f
-            Text("زمن اهتزاز التأكيد بعد الفلاش: ${"%.1f".format(seconds)} ثانية", style = MaterialTheme.typography.titleMedium)
-            Text(
-                if (flashVibrationMs == 0) "بدون اهتزاز" else "يهتز الجهاز لهاد المدة كتأكيد بعد تفعيل الفلاش.",
-                style = MaterialTheme.typography.bodySmall
-            )
-            Slider(
-                value = flashVibrationMs.toFloat(),
-                onValueChange = { flashVibrationMs = it.toInt() },
-                onValueChangeFinished = { prefs.flashConfirmVibrationMs = flashVibrationMs },
-                valueRange = 0f..3000f,
-                steps = 11 // خطوات كل 250ms تقريباً
+                onCheckedChange = { proximityGuard = it; prefs.proximityPocketGuardEnabled = it }
             )
         }
     }

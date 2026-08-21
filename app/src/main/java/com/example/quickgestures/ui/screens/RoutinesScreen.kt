@@ -72,7 +72,7 @@ private fun RoutineEditor(routine: Routine, onCancel: () -> Unit, onSave: (Routi
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
-            label = { Text("اسم الروتين (اختياري — إذا تركته فاضي رح يتسمى تلقائي)") },
+            label = { Text("اسم الروتين (اختياري)") },
             modifier = Modifier.fillMaxWidth()
         )
 

@@ -2,6 +2,7 @@ package com.example.quickgestures.services.network
 
 import android.app.Service
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.net.TrafficStats
 import android.os.Handler
@@ -51,6 +52,8 @@ class NetworkSpeedService : Service() {
     }
 
     private fun setupOverlay() {
+        val density = resources.displayMetrics.density
+
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -59,25 +62,28 @@ class NetworkSpeedService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.END
-            x = 220 // بجانب أيقونات البطارية/الواي فاي/الساعة تقريبياً
-            y = 6
+            x = (70 * density).toInt()
+            y = (2 * density).toInt()
         }
 
         val textView = TextView(this).apply {
-            textSize = 10f
-            setTextColor(0xFFFFFFFF.toInt())
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.argb(140, 0, 0, 0))
+            val pad = (4 * density).toInt()
+            setPadding(pad * 2, pad, pad * 2, pad)
         }
         overlayView = textView
-        windowManager.addView(textView, params)
+        runCatching { windowManager.addView(textView, params) }
     }
 
     private fun updateSpeed() {
-        val mode = prefs.networkSpeedDisplayMode
-        if (mode == NetworkSpeedDisplayMode.DISABLED) {
+        if (!prefs.networkSpeedEnabled) {
             overlayView?.text = ""
             return
         }
 
+        val mode = prefs.networkSpeedDisplayMode
         val now = System.currentTimeMillis()
         val elapsedSec = ((now - lastTimestamp).coerceAtLeast(1)) / 1000.0
         val rxNow = TrafficStats.getTotalRxBytes()
@@ -93,8 +99,7 @@ class NetworkSpeedService : Service() {
         overlayView?.text = when (mode) {
             NetworkSpeedDisplayMode.DOWNLOAD_ONLY -> "↓${downloadKbps}KB/s"
             NetworkSpeedDisplayMode.UPLOAD_ONLY -> "↑${uploadKbps}KB/s"
-            NetworkSpeedDisplayMode.BOTH -> "↓${downloadKbps} ↑${uploadKbps}KB/s"
-            NetworkSpeedDisplayMode.DISABLED -> ""
+            NetworkSpeedDisplayMode.BOTH -> "↓$downloadKbps ↑${uploadKbps}KB/s"
         }
     }
 

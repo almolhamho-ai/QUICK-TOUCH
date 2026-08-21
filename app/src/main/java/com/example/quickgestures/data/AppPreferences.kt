@@ -7,13 +7,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 
-/**
- * المخزن المركزي لكل إعدادات التطبيق.
- * تم تحديثه ليشمل:
- *  - حساسية الاهتزاز كرقم طبيعي من 1 إلى 10 (1 = أصعب تفعيل، 10 = أسهل تفعيل)
- *  - زمن اهتزاز التأكيد بعد تفعيل الفلاش (0 إلى 3 ثواني)
- *  - إعدادات الكرة العائمة كقائمة دائرية (Radial) بدل القائمة الخطية القديمة
- */
 class AppPreferences(context: Context) {
 
     private val prefs: SharedPreferences =
@@ -21,82 +14,99 @@ class AppPreferences(context: Context) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    // ---------------------------------------------------------------------
-    // 3) حساسية الاهتزاز: 1 (صعب) .. 10 (سهل) — رقم طبيعي فقط، لا كسور
-    // ---------------------------------------------------------------------
     companion object {
         const val SENSITIVITY_MIN = 1
         const val SENSITIVITY_MAX = 10
         const val SENSITIVITY_DEFAULT = 5
 
-        // حدود التسارع الفعلية (m/s²) المرتبطة بكل مستوى حساسية.
-        // القيمة الأعلى = عتبة أعلى = صعوبة أكبر بالتفعيل (لمستوى 1).
-        // القيمة الأدنى = عتبة أدنى = سهولة أكبر بالتفعيل (لمستوى 10).
-        private const val THRESHOLD_HARDEST = 22f   // عند حساسية = 1
-        private const val THRESHOLD_EASIEST = 8f    // عند حساسية = 10
+        private const val THRESHOLD_HARDEST = 22f
+        private const val THRESHOLD_EASIEST = 8f
 
         fun sensitivityToThreshold(level: Int): Float {
             val clamped = level.coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)
-            // تدرج خطي معكوس: كل ما زاد الرقم قلّت العتبة (أسهل)
             val fraction = (clamped - SENSITIVITY_MIN).toFloat() / (SENSITIVITY_MAX - SENSITIVITY_MIN)
             return THRESHOLD_HARDEST - (THRESHOLD_HARDEST - THRESHOLD_EASIEST) * fraction
         }
     }
 
+    // ---- حساسية الاهتزاز 1..10 ----
     var shakeSensitivityLevel: Int
-        get() = prefs.getInt("shake_sensitivity_level", SENSITIVITY_DEFAULT)
-            .coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)
-        set(value) = prefs.edit()
-            .putInt("shake_sensitivity_level", value.coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX))
-            .apply()
+        get() = prefs.getInt("shake_sensitivity_level", SENSITIVITY_DEFAULT).coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)
+        set(value) = prefs.edit().putInt("shake_sensitivity_level", value.coerceIn(SENSITIVITY_MIN, SENSITIVITY_MAX)).apply()
 
-    /** العتبة الفعلية الجاهزة للاستخدام مباشرة داخل ShakeDetectorService */
     fun currentShakeThreshold(): Float = sensitivityToThreshold(shakeSensitivityLevel)
 
-    // ---------------------------------------------------------------------
-    // 5) زمن اهتزاز التأكيد بعد تفعيل الفلاش: 0..3000 ملي ثانية (خطوة 250ms)
-    // ---------------------------------------------------------------------
+    // ---- اهتزاز التأكيد: مفعّل أو لا + المدة ----
+    var flashVibrationEnabled: Boolean
+        get() = prefs.getBoolean("flash_vibration_enabled", true)
+        set(value) = prefs.edit().putBoolean("flash_vibration_enabled", value).apply()
+
     var flashConfirmVibrationMs: Int
         get() = prefs.getInt("flash_confirm_vibration_ms", 300).coerceIn(0, 3000)
-        set(value) = prefs.edit()
-            .putInt("flash_confirm_vibration_ms", value.coerceIn(0, 3000))
-            .apply()
+        set(value) = prefs.edit().putInt("flash_confirm_vibration_ms", value.coerceIn(0, 3000)).apply()
 
-    // ---------------------------------------------------------------------
-    // 4) استخدام حساس التقارب لاكتشاف وضعية "بالجيب"
-    // ---------------------------------------------------------------------
+    // ---- حساس التقارب (تجاهل الجيب) ----
     var proximityPocketGuardEnabled: Boolean
         get() = prefs.getBoolean("proximity_pocket_guard", true)
         set(value) = prefs.edit().putBoolean("proximity_pocket_guard", value).apply()
 
-    // ---------------------------------------------------------------------
-    // إيماءات الحافة: ربط كل شكل (STRAIGHT_LINE / L_CORNER / HALF_CIRCLE) بإجراء
-    // ---------------------------------------------------------------------
+    // ---- إيماءات الحافة ----
     var edgeGestureActionMapping: Map<String, String>
         get() {
             val raw = prefs.getString("edge_gesture_mapping", null) ?: return emptyMap()
             return try { json.decodeFromString(raw) } catch (e: Exception) { emptyMap() }
         }
-        set(value) = prefs.edit()
-            .putString("edge_gesture_mapping", json.encodeToString(value))
-            .apply()
+        set(value) = prefs.edit().putString("edge_gesture_mapping", json.encodeToString(value)).apply()
 
-    // ---------------------------------------------------------------------
-    // مراقب سرعة الإنترنت
-    // ---------------------------------------------------------------------
+    var edgeGestureEnabled: Boolean
+        get() = prefs.getBoolean("edge_gesture_enabled", false)
+        set(value) = prefs.edit().putBoolean("edge_gesture_enabled", value).apply()
+
+    // ---- كشف الاهتزاز: تفعيل + الإجراء المرتبط ----
+    var shakeDetectorEnabled: Boolean
+        get() = prefs.getBoolean("shake_detector_enabled", false)
+        set(value) = prefs.edit().putBoolean("shake_detector_enabled", value).apply()
+
+    var shakeTargetActionId: String
+        get() = prefs.getString("shake_target_action_id", "flashlight_toggle") ?: "flashlight_toggle"
+        set(value) = prefs.edit().putString("shake_target_action_id", value).apply()
+
+    // ---- النقر على ظهر الهاتف (مرتين/ثلاث) ----
+    var backTapEnabled: Boolean
+        get() = prefs.getBoolean("back_tap_enabled", false)
+        set(value) = prefs.edit().putBoolean("back_tap_enabled", value).apply()
+
+    var backTapDoubleActionId: String?
+        get() = prefs.getString("back_tap_double_action_id", null)
+        set(value) = prefs.edit().putString("back_tap_double_action_id", value).apply()
+
+    var backTapTripleActionId: String?
+        get() = prefs.getString("back_tap_triple_action_id", null)
+        set(value) = prefs.edit().putString("back_tap_triple_action_id", value).apply()
+
+    // ---- بلاطات مركز التحكم (Quick Settings Tiles) القابلة للتخصيص ----
+    var quickTileAction1Id: String?
+        get() = prefs.getString("quick_tile_action_1", "flashlight_toggle")
+        set(value) = prefs.edit().putString("quick_tile_action_1", value).apply()
+
+    var quickTileAction2Id: String?
+        get() = prefs.getString("quick_tile_action_2", null)
+        set(value) = prefs.edit().putString("quick_tile_action_2", value).apply()
+
+    // ---- مراقب سرعة الإنترنت ----
+    var networkSpeedEnabled: Boolean
+        get() = prefs.getBoolean("network_speed_enabled", false)
+        set(value) = prefs.edit().putBoolean("network_speed_enabled", value).apply()
+
     var networkSpeedDisplayMode: NetworkSpeedDisplayMode
         get() = try {
-            NetworkSpeedDisplayMode.valueOf(
-                prefs.getString("network_speed_mode", NetworkSpeedDisplayMode.DISABLED.name)!!
-            )
+            NetworkSpeedDisplayMode.valueOf(prefs.getString("network_speed_mode", NetworkSpeedDisplayMode.BOTH.name)!!)
         } catch (e: Exception) {
-            NetworkSpeedDisplayMode.DISABLED
+            NetworkSpeedDisplayMode.BOTH
         }
         set(value) = prefs.edit().putString("network_speed_mode", value.name).apply()
 
-    // ---------------------------------------------------------------------
-    // تفعيل/تعطيل الكرة العائمة + وضعية العمل (جوا التطبيق فقط / Overlay على مستوى النظام)
-    // ---------------------------------------------------------------------
+    // ---- الكرة العائمة ----
     enum class QuickBallMode { IN_APP_ONLY, SYSTEM_WIDE_OVERLAY }
 
     var quickBallEnabled: Boolean
@@ -111,55 +121,35 @@ class AppPreferences(context: Context) {
         }
         set(value) = prefs.edit().putString("quick_ball_mode", value.name).apply()
 
-    // ---------------------------------------------------------------------
-    // تفعيل خدمة إيماءات الحافة وخدمة كشف الاهتزاز (كانتا موجودتين بالكود
-    // بس بدون زر تشغيل فعلي، فهيك ما كانتا تشتغلا أبداً)
-    // ---------------------------------------------------------------------
-    var edgeGestureEnabled: Boolean
-        get() = prefs.getBoolean("edge_gesture_enabled", false)
-        set(value) = prefs.edit().putBoolean("edge_gesture_enabled", value).apply()
-
-    var shakeDetectorEnabled: Boolean
-        get() = prefs.getBoolean("shake_detector_enabled", false)
-        set(value) = prefs.edit().putBoolean("shake_detector_enabled", value).apply()
-
-    // ---------------------------------------------------------------------
-    // 2) إعدادات الكرة الدائرية (Radial Quick Ball)
-    // ---------------------------------------------------------------------
     var quickBallRadialConfig: QuickBallRadialConfig
         get() {
-            val raw = prefs.getString("quick_ball_radial_config", null)
-                ?: return QuickBallRadialConfig.default()
-            return try {
-                json.decodeFromString(raw)
-            } catch (e: Exception) {
-                QuickBallRadialConfig.default()
-            }
+            val raw = prefs.getString("quick_ball_radial_config", null) ?: return QuickBallRadialConfig.default()
+            return try { json.decodeFromString(raw) } catch (e: Exception) { QuickBallRadialConfig.default() }
         }
-        set(value) = prefs.edit()
-            .putString("quick_ball_radial_config", json.encodeToString(value))
-            .apply()
+        set(value) = prefs.edit().putString("quick_ball_radial_config", json.encodeToString(value)).apply()
+
+    // ---- المظهر ----
+    enum class ThemeMode { LIGHT, DARK, SYSTEM }
+
+    var themeMode: ThemeMode
+        get() = try {
+            ThemeMode.valueOf(prefs.getString("theme_mode", ThemeMode.SYSTEM.name)!!)
+        } catch (e: Exception) {
+            ThemeMode.SYSTEM
+        }
+        set(value) = prefs.edit().putString("theme_mode", value.name).apply()
 }
 
-/**
- * إعدادات القائمة الدائرية للكرة العائمة.
- * itemsPerRing: كم اختصار يظهر بحلقة واحدة حول المركز قبل ما يحتاج تدوير.
- * rotationOffsetDegrees: زاوية التدوير الحالية المختارة من المستخدم.
- */
 @Serializable
 data class QuickBallRadialConfig(
     val selectedActionIds: List<String>,
     val itemsPerRing: Int = 6,
     val rotationOffsetDegrees: Float = 0f,
-    val collapsedSizeDp: Int = 28,      // حجم نص الدائرة الصغير على الحافة قبل الفتح
-    val centerBubbleSizeDp: Int = 56,   // حجم الدائرة المركزية
-    val satelliteBubbleSizeDp: Int = 56 // نفس مقاس الدائرة المركزية (طلب المستخدم: بنفس المقاس)
+    val collapsedSizeDp: Int = 28,
+    val centerBubbleSizeDp: Int = 56,
+    val satelliteBubbleSizeDp: Int = 56
 ) {
     companion object {
-        fun default() = QuickBallRadialConfig(
-            selectedActionIds = emptyList(),
-            itemsPerRing = 6,
-            rotationOffsetDegrees = 0f
-        )
+        fun default() = QuickBallRadialConfig(selectedActionIds = emptyList(), itemsPerRing = 6, rotationOffsetDegrees = 0f)
     }
 }

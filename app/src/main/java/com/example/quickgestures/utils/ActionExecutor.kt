@@ -2,11 +2,10 @@ package com.example.quickgestures.utils
 
 import android.content.Context
 import android.content.Intent
+import android.hardware.camera2.CameraManager
 import android.media.AudioManager
-import android.net.wifi.WifiManager
-import android.bluetooth.BluetoothAdapter
-import com.example.quickgestures.data.ActionCategory
 import com.example.quickgestures.data.GestureAction
+import com.example.quickgestures.services.AccessibilityShortcutService
 import com.example.quickgestures.services.recording.QuickRecorderService
 
 /** منفّذ مركزي لكل الإجراءات المتاحة بالكتالوج، يُستدعى من الكرة، إيماءات الحافة، والروتينات. */
@@ -15,25 +14,37 @@ class ActionExecutor(private val context: Context) {
     fun execute(action: GestureAction) {
         when (action.id) {
             "flashlight_toggle" -> toggleFlashlight()
-            "screenshot" -> requestSystemAction("screenshot")
-            "back" -> requestSystemAction("back")
-            "home" -> requestSystemAction("home")
-            "recents" -> requestSystemAction("recents")
+            "screenshot" -> AccessibilityShortcutService.instance?.performScreenshot()
+            "back" -> AccessibilityShortcutService.instance?.performBack()
+            "home" -> AccessibilityShortcutService.instance?.performHome()
+            "recents" -> AccessibilityShortcutService.instance?.performRecents()
             "volume_mute" -> toggleMute()
             "media_play_pause" -> sendMediaKey()
-            "wifi_toggle" -> toggleWifi()
-            "bt_toggle" -> toggleBluetooth()
-            "dnd_toggle" -> requestSystemAction("dnd")
+            "wifi_toggle" -> openQuickPanel(android.provider.Settings.Panel.ACTION_INTERNET_CONNECTIVITY)
+            "bt_toggle" -> context.startActivity(
+                Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            "dnd_toggle" -> toggleDoNotDisturb()
             "start_recording" -> startTransparentRecording()
             "open_app" -> { /* يحتاج اختيار تطبيق محدد من واجهة الإعدادات */ }
             else -> { /* إجراء غير معروف - تجاهل بأمان */ }
         }
     }
 
+    private var torchOn = false
+
     private fun toggleFlashlight() {
-        // التنفيذ الفعلي عبر CameraManager.setTorchMode بمكان مركزي بالتطبيق (خدمة أو مدير مخصص)
-        val intent = Intent("com.example.quickgestures.ACTION_TOGGLE_FLASHLIGHT")
-        context.sendBroadcast(intent)
+        try {
+            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            } ?: return
+            torchOn = !torchOn
+            cameraManager.setTorchMode(cameraId, torchOn)
+        } catch (e: Exception) {
+            // بعض الأجهزة برفض تشغيل الفلاش إذا الكاميرا مستخدمة بتطبيق تاني بنفس اللحظة
+        }
     }
 
     private fun toggleMute() {
@@ -54,25 +65,34 @@ class ActionExecutor(private val context: Context) {
         )
     }
 
-    private fun toggleWifi() {
-        // بدءاً من أندرويد 10 لازم تفتح لوحة الإعدادات السريعة، ما في صلاحية تبديل مباشر لتطبيق عادي
-        context.startActivity(Intent(android.provider.Settings.Panel.ACTION_WIFI).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
+    private fun openQuickPanel(panelAction: String) {
+        try {
+            context.startActivity(Intent(panelAction).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) {
+            context.startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
     }
 
-    private fun toggleBluetooth() {
-        context.startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        })
-    }
-
-    private fun requestSystemAction(action: String) {
-        val intent = Intent("com.example.quickgestures.ACTION_SYSTEM_$action")
-        context.sendBroadcast(intent)
+    private fun toggleDoNotDisturb() {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (!notificationManager.isNotificationPolicyAccessGranted) {
+            context.startActivity(
+                Intent(android.provider.Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            return
+        }
+        val newFilter = if (notificationManager.currentInterruptionFilter == android.app.NotificationManager.INTERRUPTION_FILTER_ALL) {
+            android.app.NotificationManager.INTERRUPTION_FILTER_PRIORITY
+        } else {
+            android.app.NotificationManager.INTERRUPTION_FILTER_ALL
+        }
+        notificationManager.setInterruptionFilter(newFilter)
     }
 
     private fun startTransparentRecording() {
+        val lockManager = AppLockManager(context)
+        if (!lockManager.hasInternalPinSet()) return // لازم رمز PIN معد مسبقاً قبل ما تشتغل الميزة
         val intent = Intent(context, QuickRecorderService::class.java)
         context.startForegroundService(intent)
     }
